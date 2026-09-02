@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "初中教学备课智能体"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "基于国产大模型的初中教学备课智能体，集教研科研与家校沟通于一体"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "备课智能体"
+    }
+  ]
+}

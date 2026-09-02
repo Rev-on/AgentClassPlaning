@@ -1,0 +1,14 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/Plan",
+    "pages/Courseware",
+    "pages/Quiz",
+    "pages/Research",
+    "pages/Analysis",
+    "pages/Talk",
+    "pages/Report",
+    "pages/History",
+    "pages/Settings"
+  ]
+}
