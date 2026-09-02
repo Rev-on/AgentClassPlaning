@@ -1,0 +1,56 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "C:/Users/laoyu/Desktop/Rev_Techingmaster/keys/release.p12",
+          "storePassword": "0000001FDF9F9243088AE74D7FB29D909F660742E1167DCC0F7D90ACAF3E02BBF1BC93A16D84B9A10FB97236D46E6F",
+          "keyAlias": "teach",
+          "keyPassword": "0000001F23E27ABBA180BE155CDD05FC5DD41751D697EC11E724D92DF1E0C812CABECCA13A980DADC107B664B5CD27",
+          "signAlg": "SHA256withECDSA",
+          "profile": "C:/Users/laoyu/Desktop/Rev_Techingmaster/keys/RevTechingmasterRelease.p7b",
+          "certpath": "C:/Users/laoyu/Desktop/Rev_Techingmaster/keys/RevTeachingMaster.cer"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "targetSdkVersion": "26.0.0",
+        "compatibleSdkVersion": "26.0.0",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+/**
+ * 教研科研辅助：选题建议 / 论文大纲 / 摘要润色 三种模式（双语界面 + 深浅主题）
+ */
+import common from '@ohos.app.ability.common';
+import promptAction from '@ohos.promptAction';
+import { AiService } from '../common/AiService';
+import { Prompts } from '../common/Prompts';
+import { HistoryStore } from '../common/HistoryStore';
+import { I18n } from '../common/I18n';
+import { AppTheme } from '../common/AppTheme';
+import { PageHeader } from '../common/components/PageHeader';
+import { ResultPanel } from '../common/components/ResultPanel';
+
+@Entry
+@Component
+struct Research {
+  @State mode: number = 0;   // 0 选题建议 1 论文大纲 2 摘要润色
+  @State input: string = '我教八年级物理，想研究如何利用错题本提升学生物理成绩，请给选题建议';
+  @State remark: string = '';
+  @State loading: boolean = false;
+  @State result: string = '';
+  @StorageProp('appLang') appLang: string = 'zh';
+  @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+
+  private t(key: string): string {
+    void this.appLang;
+    return I18n.t(key);
+  }
+
+  private col(key: string): string {
+    void this.resolvedTheme;
+    return AppTheme.color(key, this.resolvedTheme);
+  }
+
+  /** 模式按钮文案：按当前语言（appLang=en 时返回英文） */
+  private modeNames(): string[] {
+    void this.appLang;
+    return [this.t('rm.topic'), this.t('rm.outline'), this.t('rm.abstract')];
+  }
+
+  /** 三种模式的输入占位文案：按当前语言（appLang=en 时返回英文） */
+  private placeholders(): string[] {
+    void this.appLang;
+    return [this.t('rm.ph0'), this.t('rm.ph1'), this.t('rm.ph2')];
+  }
+
+  private systemPrompt(): string {
+    if (this.mode === 0) {
+      return Prompts.researchTopicSystem();
+    } else if (this.mode === 1) {
+      return Prompts.researchOutlineSystem();
+    }
+    return Prompts.researchAbstractSystem();
+  }
+
+  async generate(): Promise<void> {
+    if (this.input.trim() === '') {
+      promptAction.showToast({ message: this.appLang === 'en' ? 'Please enter content first' : '请先输入内容' });
+      return;
+    }
+    this.loading = true;
+    this.result = '';
+    const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
+    try {
+      const content: string = await AiService.chat(this.systemPrompt(), this.input + remarkPart, (partial: string) => {
+        this.result = partial;
+      });
+      this.result = content;
+    } catch (e) {
+      promptAction.showToast({ message: (this.appLang === 'en' ? 'Failed: ' : '生成失败：') + (e as Error).message });
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  saveToHistory(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const typeLabel: string = I18n.t('page.research');
+    HistoryStore.addRecord(ctx, {
+      type: typeLabel,
+      title: typeLabel + '-' + this.input.slice(0, 12),
+      content: this.result,
+      time: HistoryStore.formatNow()
+    }).then(() => {
+      promptAction.showToast({ message: I18n.t('toast.saved') });
+    });
+  }
+
+  build() {
+    Column({ space: 0 }) {
+      PageHeader({ title: this.t('page.research') })
+
+      // 模式切换
+      Row({ space: 8 }) {
+        ForEach(this.modeNames(), (name: string, index: number) => {
+          Button(name)
+            .fontSize(14)
+            .fontColor(this.mode === index ? '#FFFFFF' : this.col('sub'))
+            .backgroundColor(this.mode === index ? '#7B61C2' : this.col('card'))
+            .height(38)
+            .layoutWeight(1)
+            .onClick(() => {
+              this.mode = index;
+              this.result = '';
+            })
+        }, (name: string) => name)
+      }
+      .width('100%')
+      .padding({ top: 4, bottom: 10 })
+
+      // 输入区
+      Column({ space: 10 }) {
+        TextArea({ text: this.input, placeholder: this.placeholders()[this.mode] })
+          .width('100%')
+          .height(120)
+          .fontSize(15)
+          .onChange((v: string) => { this.input = v; })
+
+        Text(this.t('label.remark'))
+          .fontSize(12)
+          .fontColor(this.col('hint'))
+          .width('100%')
+        TextInput({ text: this.remark, placeholder: this.t('ph.remark') })
+          .width('100%')
+          .height(42)
+          .fontSize(13)
+          .onChange((v: string) => { this.remark = v; })
+
+        Button(this.loading ? this.t('gen.loading') : this.t('act.research'))
+          .width('100%')
+          .height(44)
+          .backgroundColor(this.loading ? '#B3A3D9' : '#7B61C2')
+          .enabled(!this.loading)
+          .onClick(() => {
+            this.generate();
+          })
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor(this.col('card'))
+      .borderRadius(14)
+
+      if (this.loading) {
+        Row({ space: 10 }) {
+          LoadingProgress().width(26).height(26).color('#7B61C2')
+          Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+        }.width('100%').justifyContent(FlexAlign.Center).padding(20)
+      } else if (this.result !== '') {
+        ResultPanel({
+          result: this.result,
+          type: I18n.t('page.research'),
+          title: I18n.t('page.research') + '-' + this.input.slice(0, 12),
+          onSave: () => this.saveToHistory()
+        })
+          .layoutWeight(1)
+          .padding(16)
+      } else {
+        Row() {
+          Text(this.t('hint.common'))
+            .fontSize(12)
+            .fontColor(this.col('hint'))
+            .lineHeight(18)
+        }
+        .width('100%')
+        .padding(16)
+        .layoutWeight(1)
+        .alignItems(VerticalAlign.Top)
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .padding(12)
+    .backgroundColor(this.col('bg'))
+  }
+}
