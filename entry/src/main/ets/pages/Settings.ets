@@ -2,11 +2,15 @@
  * 设置页：语言（下拉）、主题（下拉：浅色/深色/跟随系统）、关于、AGPL 与水印
  */
 import common from '@ohos.app.ability.common';
+import Want from '@ohos.app.ability.Want';
 import promptAction from '@ohos.promptAction';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppSettings } from '../common/AppSettings';
 import { PageHeader } from '../common/components/PageHeader';
+
+/** 开源仓库地址（GitCode），点击后经系统浏览器打开 */
+const REPO_URL: string = 'https://gitcode.com/RTX6090/Techingmaster';
 
 @Entry
 @Component
@@ -75,6 +79,21 @@ struct Settings {
     const ctx = getContext(this) as common.UIAbilityContext;
     AppSettings.saveTheme(ctx, theme).then(() => {
       promptAction.showToast({ message: I18n.t('set.themeHint') });
+    });
+  }
+
+  /** 打开系统浏览器访问开源仓库，鼓励用户点亮 Star */
+  private openRepo(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const want: Want = {
+      action: 'ohos.want.action.viewData',
+      entities: ['entity.system.browsable'],
+      uri: REPO_URL
+    };
+    ctx.startAbility(want).then(() => {
+      promptAction.showToast({ message: I18n.t('set.repoToast') });
+    }).catch(() => {
+      promptAction.showToast({ message: this.appLang === 'en' ? 'Cannot open the browser' : '无法打开浏览器' });
     });
   }
 
@@ -175,6 +194,24 @@ struct Settings {
             Text('https://www.gnu.org/licenses/agpl-3.0.html')
               .fontSize(12)
               .fontColor('#4A90D9')
+              .width('100%')
+            Text(this.t('set.repoTitle'))
+              .fontSize(13)
+              .fontColor(this.col('sub'))
+              .width('100%')
+              .margin({ top: 6 })
+            Text(REPO_URL)
+              .fontSize(13)
+              .fontColor('#4A90D9')
+              .decoration({ type: TextDecorationType.Underline, color: '#4A90D9' })
+              .width('100%')
+              .onClick(() => {
+                this.openRepo();
+              })
+            Text(this.t('set.starTip'))
+              .fontSize(12)
+              .fontColor(this.col('hint'))
+              .lineHeight(18)
               .width('100%')
           }
           .width('100%')
