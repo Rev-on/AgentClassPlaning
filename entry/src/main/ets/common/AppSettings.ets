@@ -14,6 +14,7 @@ export class AppSettings {
   private static readonly STORE: string = 'app_settings';
   private static readonly KEY_LANG: string = 'appLang';
   private static readonly KEY_THEME: string = 'appTheme';
+  private static readonly KEY_AGREED: string = 'disclaimerAgreed';
 
   /** 启动时加载持久化设置并应用（含 colorMode） */
   static async load(context: common.UIAbilityContext): Promise<void> {
@@ -32,6 +33,24 @@ export class AppSettings {
     AppStorage.setOrCreate(I18n.LANG_KEY, lang);
     AppStorage.setOrCreate(AppTheme.THEME_KEY, theme);
     AppSettings.applyColorMode(context, theme);
+  }
+
+  /** 读取"已同意免责声明"标记（默认 false） */
+  static async loadAgreed(context: common.UIAbilityContext): Promise<boolean> {
+    try {
+      const store = await preferences.getPreferences(context, AppSettings.STORE);
+      const v = await store.get(AppSettings.KEY_AGREED, false);
+      return (v as boolean) === true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 保存"已同意免责声明"（同意后永久不再提示） */
+  static async saveAgreed(context: common.UIAbilityContext): Promise<void> {
+    const store = await preferences.getPreferences(context, AppSettings.STORE);
+    await store.put(AppSettings.KEY_AGREED, true);
+    await store.flush();
   }
 
   /** 保存语言并立即生效 */

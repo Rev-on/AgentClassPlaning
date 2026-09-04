@@ -3,8 +3,110 @@
  *  备课助手 / 家校沟通 / 我的（历史记录、设置等入口）
  */
 import router from '@ohos.router';
+import common from '@ohos.app.ability.common';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AcceptStore } from '../common/AcceptStore';
+
+/** 免责声明弹窗：首次启动显示，倒计时 5 秒后方可同意；同意后永久不再显示 */
+@CustomDialog
+struct DisclaimerDialog {
+  controller: CustomDialogController = new CustomDialogController({ builder: undefined });
+  @State remain: number = 5;
+  private timer: number = -1;
+  @StorageProp('appLang') appLang: string = 'zh';
+  @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+
+  aboutToAppear(): void {
+    this.timer = setInterval(() => {
+      if (this.remain > 0) {
+        this.remain--;
+        if (this.remain === 0 && this.timer !== -1) {
+          clearInterval(this.timer);
+          this.timer = -1;
+        }
+      }
+    }, 1000);
+  }
+
+  aboutToDisappear(): void {
+    if (this.timer !== -1) {
+      clearInterval(this.timer);
+      this.timer = -1;
+    }
+  }
+
+  private t(key: string): string {
+    void this.appLang;
+    return I18n.t(key);
+  }
+
+  private col(key: string): string {
+    void this.resolvedTheme;
+    return AppTheme.color(key, this.resolvedTheme);
+  }
+
+  /** 同意：写入标记后关闭，此后不再显示 */
+  private onAgree(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    AcceptStore.setAccepted(ctx).then(() => {
+      this.controller.close();
+    }).catch(() => {
+      this.controller.close();
+    });
+  }
+
+  /** 不同意：直接退出应用（不写标记，下次进入仍显示） */
+  private onDisagree(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    ctx.terminateSelf().catch(() => {
+      // 退出失败则关闭弹窗兜底
+      this.controller.close();
+    });
+  }
+
+  build() {
+    Column({ space: 14 }) {
+      Text(this.t('dlg.title'))
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.col('title'))
+        .width('100%')
+      Text(this.t('dlg.body'))
+        .fontSize(14)
+        .fontColor(this.col('text'))
+        .lineHeight(23)
+        .width('100%')
+      if (this.remain > 0) {
+        Text(this.t('dlg.count').replace('{n}', this.remain.toString()))
+          .fontSize(12)
+          .fontColor(this.col('hint'))
+          .width('100%')
+      }
+      Row({ space: 10 }) {
+        Button(this.t('dlg.agree'))
+          .fontSize(14)
+          .height(40)
+          .layoutWeight(1)
+          .backgroundColor('#4A90D9')
+          .enabled(this.remain === 0)
+          .opacity(this.remain === 0 ? 1 : 0.45)
+          .onClick(() => this.onAgree())
+        Button(this.t('dlg.disagree'))
+          .fontSize(14)
+          .height(40)
+          .layoutWeight(1)
+          .backgroundColor('#C0392B')
+          .onClick(() => this.onDisagree())
+      }
+      .width('100%')
+    }
+    .width('88%')
+    .padding(20)
+    .backgroundColor(this.col('card'))
+    .borderRadius(18)
+  }
+}
 
 /** 功能入口卡片（@Prop 单向同步，保证语言切换后标题描述即时更新） */
 @Component
@@ -63,6 +165,21 @@ struct FunCard {
 struct Index {
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  private dialogController: CustomDialogController = new CustomDialogController({
+    builder: DisclaimerDialog(),
+    autoCancel: false
+  });
+
+  aboutToAppear(): void {
+    // 首次进入（未同意过免责声明）时弹出使用须知
+    const ctx = getContext(this) as common.UIAbilityContext;
+    AcceptStore.getAccepted(ctx).then((acc: boolean) => {
+      if (!acc) {
+        this.dialogController.open();
+      }
+    }).catch(() => {
+    });
+  }
 
   private t(key: string): string {
     void this.appLang;
@@ -129,6 +246,13 @@ struct Index {
                   icon: '析', title: this.t('card.analysis'), desc: this.t('card.analysis.desc'),
                   bgColor: '#E6F4F2',
                   onTap: () => router.pushUrl({ url: 'pages/Analysis' })
+                })
+              }
+              GridItem() {
+                FunCard({
+                  icon: '位', title: this.t('card.seats'), desc: this.t('card.seats.desc'),
+                  bgColor: '#FFF0E6',
+                  onTap: () => router.pushUrl({ url: 'pages/Seats' })
                 })
               }
             }

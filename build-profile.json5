@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "storeFile": "C:/Users/laoyu/Desktop/Rev_Techingmaster/keys/release.p12",
-          "storePassword": "0000001FDF9F9243088AE74D7FB29D909F660742E1167DCC0F7D90ACAF3E02BBF1BC93A16D84B9A10FB97236D46E6F",
-          "keyAlias": "teach",
-          "keyPassword": "0000001F23E27ABBA180BE155CDD05FC5DD41751D697EC11E724D92DF1E0C812CABECCA13A980DADC107B664B5CD27",
+          "certpath": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BEA1276EB45510C6DDD465BFAB86FCC78EB5F26CAC28D63ACF567526900AA70C4494ABAEACFF21B",
+          "profile": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.p7b",
           "signAlg": "SHA256withECDSA",
-          "profile": "C:/Users/laoyu/Desktop/Rev_Techingmaster/keys/RevTechingmasterRelease.p7b",
-          "certpath": "C:/Users/laoyu/Desktop/Rev_Techingmaster/keys/RevTeachingMaster.cer"
+          "storeFile": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.p12",
+          "storePassword": "0000001B036415818A818C17D734AA6884581C7E6D4AFB526AB85DAFB1F331F7469A9176A04E63999B68C5"
         }
       }
     ],

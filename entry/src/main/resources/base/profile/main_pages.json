@@ -1,5 +1,6 @@
 {
   "src": [
+    "pages/Splash",
     "pages/Index",
     "pages/Plan",
     "pages/Courseware",
@@ -9,6 +10,7 @@
     "pages/Talk",
     "pages/Report",
     "pages/History",
-    "pages/Settings"
+    "pages/Settings",
+    "pages/Seats"
   ]
 }
