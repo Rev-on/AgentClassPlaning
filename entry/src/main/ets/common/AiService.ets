@@ -54,17 +54,33 @@ export class AiService {
    * @param systemPrompt 系统提示词（角色与输出规范）
    * @param userPrompt 用户输入内容
    * @param onDelta 保留参数（兼容历史调用），当前实现不使用
+   * @param skipNote 为 true 时不追加"AI生成"尾注（如课件大纲 JSON 结构化输出）
    */
-  static async chat(systemPrompt: string, userPrompt: string, onDelta?: (partial: string) => void): Promise<string> {
+  static async chat(systemPrompt: string, userPrompt: string, onDelta?: (partial: string) => void,
+    skipNote: boolean = false): Promise<string> {
     let lastErr: Error = new Error('AI 请求失败，请稍后重试');
     for (let attempt: number = 0; attempt < AiService.MAX_ATTEMPTS; attempt++) {
       try {
-        return await AiService.requestOnce(systemPrompt, userPrompt);
+        const raw: string = await AiService.requestOnce(systemPrompt, userPrompt);
+        return AiService.withAiNote(raw, skipNote);
       } catch (e) {
         lastErr = e instanceof Error ? e : new Error('AI 请求失败，请稍后重试');
       }
     }
     throw lastErr;
+  }
+
+  /** 在生成内容末尾追加"AI 生成"标注（软件层统一生效，课件 JSON 除外） */
+  static withAiNote(content: string, skip: boolean): string {
+    if (skip || content === '') {
+      return content;
+    }
+    const lang: string | undefined = AppStorage.get<string>('appLang');
+    const tail: string = lang === 'en' ? '(AI-generated, for reference only)' : '（AI生成，仅供参考）';
+    if (content.trim().endsWith(tail)) {
+      return content;
+    }
+    return content + '\n\n' + tail;
   }
 
   /** 单次请求 */

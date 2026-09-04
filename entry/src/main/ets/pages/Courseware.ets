@@ -46,7 +46,7 @@ struct Courseware {
     try {
       const content: string = await AiService.chat(Prompts.coursewareSystem(), user, (partial: string) => {
         this.result = partial;
-      });
+      }, true);
       this.result = content;
     } catch (e) {
       promptAction.showToast({ message: (this.appLang === 'en' ? 'Failed: ' : '生成失败：') + (e as Error).message });

@@ -16,7 +16,6 @@ import { PageHeader } from '../common/components/PageHeader';
 struct ClassDetail {
   @State cur: ClassItem = { id: -1, name: '', students: [] };
   @State loaded: boolean = false;
-  @State inNo: string = '';
   @State inName: string = '';
   @State inHeight: string = '';
   @StorageProp('appLang') appLang: string = 'zh';
@@ -66,26 +65,35 @@ struct ClassDetail {
     this.persist();
   }
 
+  /** 自动分配学号：从 1 开始找最小未占用编号（引导按学号顺序输入） */
+  private nextFreeNo(): string {
+    let n: number = 1;
+    while (true) {
+      const key: string = n.toString();
+      let used: boolean = false;
+      for (let i = 0; i < this.cur.students.length; i++) {
+        if (this.cur.students[i].no === key) {
+          used = true;
+          break;
+        }
+      }
+      if (!used) {
+        return key;
+      }
+      n++;
+    }
+  }
+
   private addStudent(): void {
     const name: string = this.inName.trim();
     if (name === '') {
       promptAction.showToast({ message: this.t('cls.nameNeed') });
       return;
     }
-    const no: string = this.inNo.trim();
-    const stu: StudentItem = { no: no, name: name, height: this.inHeight.trim(), note: '' };
-    if (no !== '') {
-      for (let i = 0; i < this.cur.students.length; i++) {
-        if (this.cur.students[i].no === no) {
-          promptAction.showToast({ message: this.t('cls.dupNo').replace('{n}', no) });
-          return;
-        }
-      }
-    }
+    const stu: StudentItem = { no: this.nextFreeNo(), name: name, height: this.inHeight.trim(), note: '' };
     const next: StudentItem[] = this.cur.students.slice();
     next.push(stu);
     this.cur = { id: this.cur.id, name: this.cur.name, students: next };
-    this.inNo = '';
     this.inName = '';
     this.inHeight = '';
     this.persist();
@@ -206,15 +214,9 @@ struct ClassDetail {
             .borderRadius(14)
             .alignItems(HorizontalAlign.Start)
 
-            // 手动添加
+            // 手动添加（学号自动编号）
             Column({ space: 8 }) {
               Row({ space: 8 }) {
-                TextInput({ text: this.inNo, placeholder: this.t('cls.colNo') })
-                  .layoutWeight(1)
-                  .backgroundColor(this.col('inputBg'))
-                  .fontColor(this.col('text'))
-                  .placeholderColor(this.col('hint'))
-                  .onChange((v: string) => { this.inNo = v; })
                 TextInput({ text: this.inName, placeholder: this.t('cls.colName') })
                   .layoutWeight(1.4)
                   .backgroundColor(this.col('inputBg'))
@@ -228,13 +230,13 @@ struct ClassDetail {
                   .fontColor(this.col('text'))
                   .placeholderColor(this.col('hint'))
                   .onChange((v: string) => { this.inHeight = v; })
+                Button(this.t('cls.add'))
+                  .fontSize(13)
+                  .height(40)
+                  .backgroundColor('#3E9B6F')
+                  .onClick(() => this.addStudent())
               }
               .width('100%')
-              Button(this.t('cls.add'))
-                .width('100%')
-                .height(38)
-                .backgroundColor('#3E9B6F')
-                .onClick(() => this.addStudent())
             }
             .width('100%')
             .padding(14)

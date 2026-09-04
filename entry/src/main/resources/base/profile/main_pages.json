@@ -11,6 +11,8 @@
     "pages/Report",
     "pages/History",
     "pages/Settings",
-    "pages/Seats"
+    "pages/Seats",
+    "pages/ClassManager",
+    "pages/ClassDetail"
   ]
 }

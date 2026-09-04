@@ -19,8 +19,24 @@ struct Research {
   @State remark: string = '';
   @State loading: boolean = false;
   @State result: string = '';
+  /** 底部水印闪烁 */
+  @State blink: boolean = false;
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  private blinkTimer: number = -1;
+
+  aboutToAppear(): void {
+    this.blinkTimer = setInterval(() => {
+      this.blink = !this.blink;
+    }, 650);
+  }
+
+  aboutToDisappear(): void {
+    if (this.blinkTimer !== -1) {
+      clearInterval(this.blinkTimer);
+      this.blinkTimer = -1;
+    }
+  }
 
   private t(key: string): string {
     void this.appLang;
@@ -166,6 +182,17 @@ struct Research {
         .layoutWeight(1)
         .alignItems(VerticalAlign.Top)
       }
+
+      // 底部红色呼吸闪烁水印
+      Text(this.t('research.wm'))
+        .fontSize(10)
+        .fontColor('#E11D48')
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .lineHeight(16)
+        .padding({ bottom: 4 })
+        .opacity(this.blink ? 1 : 0.25)
+        .animation({ duration: 450, curve: Curve.EaseInOut })
     }
     .width('100%')
     .height('100%')

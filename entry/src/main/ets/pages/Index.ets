@@ -353,11 +353,25 @@ struct Index {
                   onTap: () => router.pushUrl({ url: 'pages/Settings' })
                 })
               }
+              GridItem() {
+                FunCard({
+                  icon: '班', title: this.t('card.classes'), desc: this.t('card.classes.desc'),
+                  bgColor: '#F3EDFB',
+                  onTap: () => router.pushUrl({ url: 'pages/ClassManager' })
+                })
+              }
             }
             .columnsTemplate('1fr 1fr')
             .columnsGap(12)
             .rowsGap(12)
             .width('100%')
+
+            Text(this.t('mine.local'))
+              .fontSize(11)
+              .fontColor(this.col('faint'))
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .padding({ top: 10 })
           }
           .width('100%')
           .padding(16)
