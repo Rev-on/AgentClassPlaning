@@ -337,6 +337,13 @@ struct Splash {
     return AppTheme.color(key, this.resolvedTheme);
   }
 
+  /** 华为云品牌图标：深色模式用深色版，浅色模式用浅色版 */
+  private cloudIcon(): Resource {
+    return this.resolvedTheme === 'dark'
+      ? $r('app.media.huaweicloud_dark')
+      : $r('app.media.huaweicloud');
+  }
+
   private slogan1(): string {
     void this.appLang;
     return I18n.t('splash.l1');
@@ -402,7 +409,20 @@ struct Splash {
           .fontFamily(AppFonts.family())
           .fontSize(11)
           .fontColor(this.col('faint'))
-          .padding({ bottom: 26 })
+          .padding({ bottom: 8 })
+        Row({ space: 5 }) {
+          Image(this.cloudIcon())
+            .width(20)
+            .height(20)
+            .objectFit(ImageFit.Contain)
+          Text('华为云™提供技术支持')
+            .fontFamily(AppFonts.family())
+            .fontSize(11)
+            .fontColor(this.col('faint'))
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+        .padding({ bottom: 26 })
       }
       .width('100%')
       .height('100%')
