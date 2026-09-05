@@ -218,7 +218,20 @@ export class I18n {
     ['talk.t2', '正式规范'],
     ['talk.t3', '激励引导'],
     ['splash.l1', '教学如此简单，'],
-    ['splash.l2', '可惜你才知道']
+    ['splash.l2', '可惜你才知道'],
+    ['seats.importRoster', '导入班级名单'],
+    ['seats.saveRoster', '保存到班级名单'],
+    ['seats.pickClass', '导入班级'],
+    ['seats.saveTarget', '保存到班级'],
+    ['seats.newClass', '新建班级…'],
+    ['seats.classNamePh', '如：扬帆18班'],
+    ['seats.noClass', '暂无班级，请先到“我的-班级管理”创建'],
+    ['seats.classNeed', '请选择班级或填写班级名称'],
+    ['seats.imported', '已导入 {n} 名学生{extra}'],
+    ['seats.saved', '已保存 {n} 人到班级：{name}'],
+    ['seats.skipH', '（{n} 人无身高，未导入）'],
+    ['seats.listEmpty', '身高名单为空，请先填写'],
+    ['seats.doImport', '导入']
   ]);
 
   private static readonly en: Map<string, string> = new Map<string, string>([
@@ -426,7 +439,20 @@ export class I18n {
     ['talk.t2', 'Formal and professional'],
     ['talk.t3', 'Encouraging and guiding'],
     ['splash.l1', 'Teaching, this simple.'],
-    ['splash.l2', "if only you'd known sooner."]
+    ['splash.l2', "if only you'd known sooner."],
+    ['seats.importRoster', 'Import Class Roster'],
+    ['seats.saveRoster', 'Save to Class Roster'],
+    ['seats.pickClass', 'Import class'],
+    ['seats.saveTarget', 'Save to class'],
+    ['seats.newClass', 'New class…'],
+    ['seats.classNamePh', 'e.g. Yangfan 18'],
+    ['seats.noClass', 'No classes yet. Create one under "Me > Classes" first'],
+    ['seats.classNeed', 'Pick a class or enter a name'],
+    ['seats.imported', 'Imported {n} student(s){extra}'],
+    ['seats.saved', 'Saved {n} to class: {name}'],
+    ['seats.skipH', ' ({n} without height, skipped)'],
+    ['seats.listEmpty', 'The height list is empty'],
+    ['seats.doImport', 'Import']
   ]);
 
   /** 读取当前语言：'zh' | 'en' | 'ug' | 'bo' | 'mn'（默认 zh） */

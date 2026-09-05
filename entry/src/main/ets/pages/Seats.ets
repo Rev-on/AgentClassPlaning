@@ -13,6 +13,7 @@ import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { HistoryStore } from '../common/HistoryStore';
 import { DocxExporter } from '../common/DocxExporter';
+import { ClassStore, ClassItem, StudentItem } from '../common/ClassStore';
 import { PageHeader } from '../common/components/PageHeader';
 
 /** 一名学生的数据 */
@@ -157,6 +158,12 @@ struct Seats {
   /** 左/右护法位指定学生（空=自动安排） */
   @State sideLName: string = '';
   @State sideRName: string = '';
+  /** 名单联动：0=关闭，1=导入班级名单，2=保存到班级名单 */
+  @State rosterMode: number = 0;
+  @State classes: ClassItem[] = [];
+  /** 选中班级下标：保存模式等于 classes.length 表示新建班级 */
+  @State pickIdx: number = -1;
+  @State newClassName: string = '';
   /** 已选中座位（-1 表示未选中；r=-1 表示讲台侧座） */
   @State sR: number = -1;
   @State sC: number = -1;
@@ -246,6 +253,199 @@ struct Seats {
     this.sC = -1;
     promptAction.showToast({ message: this.t('seats.regen') });
   }
+
+  // ============ 班级名单联动 ============
+
+  /** 从当前输入文本解析（供保存名单使用） */
+  private parseStudents(): SeatStudent[] {
+    return SeatsAlgorithm.parse(this.studentText);
+  }
+
+  private async reloadClasses(): Promise<void> {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    this.classes = await ClassStore.loadAll(ctx);
+  }
+
+  /** 打开导入面板 */
+  private async openImport(): Promise<void> {
+    this.rosterMode = 1;
+    this.pickIdx = -1;
+    await this.reloadClasses();
+    if (this.classes.length === 0) {
+      this.rosterMode = 0;
+      promptAction.showToast({ message: this.t('seats.noClass') });
+    }
+  }
+
+  /** 打开保存面板 */
+  private async openSave(): Promise<void> {
+    this.rosterMode = 2;
+    this.pickIdx = -1;
+    this.newClassName = '';
+    await this.reloadClasses();
+    if (this.classes.length === 0) {
+      // 无班级时直接退化为“新建班级”模式
+      this.pickIdx = 0;
+    }
+  }
+
+  private closeRoster(): void {
+    this.rosterMode = 0;
+    this.pickIdx = -1;
+  }
+
+  /** 班级选择项（导入模式不含新建项） */
+  private classOptions(): SelectOption[] {
+    const opts: SelectOption[] = [];
+    for (let i = 0; i < this.classes.length; i++) {
+      const opt: SelectOption = { value: this.classes[i].name };
+      opts.push(opt);
+    }
+    if (this.rosterMode === 2) {
+      const opt: SelectOption = { value: this.t('seats.newClass') };
+      opts.push(opt);
+    }
+    return opts;
+  }
+
+  /** 当前选择显示文案 */
+  private pickLabel(): string {
+    if (this.pickIdx >= 0 && this.pickIdx < this.classes.length) {
+      return this.classes[this.pickIdx].name;
+    }
+    if (this.pickIdx === this.classes.length && this.rosterMode === 2) {
+      return this.t('seats.newClass');
+    }
+    return this.classOptions().length > 0 ? (this.classOptions()[0].value as string) : '';
+  }
+
+  /** 是否处于“保存到新建班级” */
+  private isNewTarget(): boolean {
+    return this.rosterMode === 2 && this.classes.length === 0 ||
+      (this.rosterMode === 2 && this.pickIdx === this.classes.length);
+  }
+
+  /** 一键导入：所选班级学生（有身高）填入名单框 */
+  private doImport(): void {
+    if (this.pickIdx < 0 || this.pickIdx >= this.classes.length) {
+      promptAction.showToast({ message: this.t('seats.classNeed') });
+      return;
+    }
+    const item: ClassItem = this.classes[this.pickIdx];
+    const lines: string[] = [];
+    let skip: number = 0;
+    for (let i = 0; i < item.students.length; i++) {
+      const st: StudentItem = item.students[i];
+      const h: number = parseInt(st.height);
+      if (!isNaN(h) && h > 0) {
+        lines.push(st.name.trim() + ' ' + h);
+      } else {
+        skip++;
+      }
+    }
+    this.studentText = lines.join('\n');
+    let msg: string = this.t('seats.imported')
+      .replace('{n}', lines.length.toString())
+      .replace('{extra}', '');
+    if (skip > 0) {
+      msg += this.t('seats.skipH').replace('{n}', skip.toString());
+    }
+    this.closeRoster();
+    promptAction.showToast({ message: msg });
+  }
+
+  /** 由当前名单文本生成 StudentItem[]：已有班级同名学生更新身高，新学生追加并自动补学号 */
+  private buildRoster(list: SeatStudent[], old: StudentItem[]): StudentItem[] {
+    const out: StudentItem[] = [];
+    // 保留原有顺序，同名更新身高
+    for (let i = 0; i < old.length; i++) {
+      let hit: boolean = false;
+      for (let j = 0; j < list.length; j++) {
+        if (old[i].name.trim() === list[j].name.trim()) {
+          out.push({
+            no: old[i].no,
+            name: old[i].name,
+            height: list[j].height.toString(),
+            note: old[i].note
+          });
+          hit = true;
+          break;
+        }
+      }
+      if (!hit) {
+        out.push(old[i]);
+      }
+    }
+    // 新学生追加
+    for (let j = 0; j < list.length; j++) {
+      let exists: boolean = false;
+      for (let i = 0; i < old.length; i++) {
+        if (old[i].name.trim() === list[j].name.trim()) {
+          exists = true;
+          break;
+        }
+      }
+      if (!exists) {
+        out.push({ no: '', name: list[j].name.trim(), height: list[j].height.toString(), note: '' });
+      }
+    }
+    // 空缺学号按顺序自动补号（从现有最大号 +1 开始）
+    let maxNo: number = 0;
+    for (let i = 0; i < out.length; i++) {
+      const n: number = parseInt(out[i].no);
+      if (!isNaN(n) && n > maxNo) {
+        maxNo = n;
+      }
+    }
+    let next: number = maxNo + 1;
+    for (let i = 0; i < out.length; i++) {
+      if (out[i].no.trim() === '') {
+        out[i] = { no: next.toString(), name: out[i].name, height: out[i].height, note: out[i].note };
+        next++;
+      }
+    }
+    return out;
+  }
+
+  /** 保存当前名单到班级（选已有班级则合并更新，否则新建班级） */
+  private async doSave(): Promise<void> {
+    const list: SeatStudent[] = this.parseStudents();
+    if (list.length === 0) {
+      promptAction.showToast({ message: this.t('seats.listEmpty') });
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    let roster: StudentItem[] = [];
+    let targetName: string = '';
+    if (this.pickIdx >= 0 && this.pickIdx < this.classes.length) {
+      const item: ClassItem = this.classes[this.pickIdx];
+      roster = this.buildRoster(list, item.students);
+      const updated: ClassItem = { id: item.id, name: item.name, students: roster };
+      await ClassStore.updateClass(ctx, updated);
+      targetName = item.name;
+    } else if (this.isNewTarget()) {
+      const name: string = this.newClassName.trim();
+      if (name === '') {
+        promptAction.showToast({ message: this.t('seats.classNeed') });
+        return;
+      }
+      const empty: StudentItem[] = [];
+      roster = this.buildRoster(list, empty);
+      await ClassStore.addClass(ctx, name, roster);
+      targetName = name;
+    } else {
+      promptAction.showToast({ message: this.t('seats.classNeed') });
+      return;
+    }
+    this.closeRoster();
+    await this.reloadClasses();
+    promptAction.showToast({
+      message: this.t('seats.saved')
+        .replace('{n}', list.length.toString())
+        .replace('{name}', targetName)
+    });
+  }
+
 
   /** 统一取座位内容：r=-1 取讲台侧座（c=0 左、c=1 右），否则取网格 */
   private cellOf(r: number, c: number): string {
@@ -535,6 +735,88 @@ struct Seats {
               .height(42)
               .backgroundColor('#D97706')
               .onClick(() => this.generateSeats())
+
+            Row({ space: 8 }) {
+              Button(this.t('seats.importRoster'))
+                .fontFamily(AppFonts.family())
+                .fontSize(13)
+                .height(38)
+                .layoutWeight(1)
+                .backgroundColor('#4A90D9')
+                .onClick(() => {
+                  this.openImport();
+                })
+              Button(this.t('seats.saveRoster'))
+                .fontFamily(AppFonts.family())
+                .fontSize(13)
+                .height(38)
+                .layoutWeight(1)
+                .backgroundColor('#5BA8A0')
+                .onClick(() => {
+                  this.openSave();
+                })
+            }
+            .width('100%')
+
+            // 名单联动面板：导入（选班级）或保存（选已有/新建）
+            if (this.rosterMode !== 0) {
+              Column({ space: 8 }) {
+                Row({ space: 8 }) {
+                  Text(this.rosterMode === 1 ? this.t('seats.pickClass') : this.t('seats.saveTarget'))
+                    .fontSize(13)
+                    .fontColor(this.col('sub'))
+                    .width(96)
+                    .fontFamily(AppFonts.family())
+                  Select(this.classOptions())
+                    .selected(this.pickIdx < 0 ? 0 : this.pickIdx)
+                    .value(this.pickLabel())
+                    .fontColor(this.col('text'))
+                    .layoutWeight(1)
+                    .onSelect((index: number) => {
+                      this.pickIdx = index;
+                      if (!this.isNewTarget()) {
+                        this.newClassName = '';
+                      }
+                    })
+                }
+                .width('100%')
+                if (this.isNewTarget()) {
+                  TextInput({ text: this.newClassName, placeholder: this.t('seats.classNamePh') })
+                    .fontFamily(AppFonts.family())
+                    .width('100%')
+                    .height(40)
+                    .onChange((v: string) => { this.newClassName = v; })
+                }
+                Row({ space: 8 }) {
+                  Button(this.t('btn.close'))
+                    .fontFamily(AppFonts.family())
+                    .fontSize(13)
+                    .height(36)
+                    .layoutWeight(1)
+                    .backgroundColor(this.col('line'))
+                    .fontColor(this.col('text'))
+                    .onClick(() => this.closeRoster())
+                  Button(this.rosterMode === 1 ? this.t('seats.doImport') : this.t('cls.saveName'))
+                    .fontFamily(AppFonts.family())
+                    .fontSize(13)
+                    .height(36)
+                    .layoutWeight(1)
+                    .backgroundColor(this.rosterMode === 1 ? '#4A90D9' : '#5BA8A0')
+                    .onClick(() => {
+                      if (this.rosterMode === 1) {
+                        this.doImport();
+                      } else {
+                        this.doSave();
+                      }
+                    })
+                }
+                .width('100%')
+              }
+              .width('100%')
+              .padding(10)
+              .backgroundColor(this.col('codeBg'))
+              .borderRadius(10)
+            }
           }
           .width('100%')
           .padding(14)

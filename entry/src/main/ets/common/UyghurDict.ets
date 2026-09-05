@@ -209,5 +209,18 @@ export class UyghurDict {
     ['talk.t3', 'ئىلھاملاندۇرۇش يېتەكلەش'],
     ['splash.l1', 'ئوقۇتۇش مۇشۇنداق ئاددىي،'],
     ['splash.l2', 'كەسكىنلا ئۇنى بىلمىگەن'],
+    ['seats.importRoster', 'سىنىپ تىزىملىكىنى كىرگۈزۈش'],
+    ['seats.saveRoster', 'سىنىپ تىزىملىكىگە ساقلاش'],
+    ['seats.pickClass', 'كىرگۈزۈش سىنىپى'],
+    ['seats.saveTarget', 'ساقلاش سىنىپى'],
+    ['seats.newClass', 'يېڭى سىنىپ…'],
+    ['seats.classNamePh', 'مىسال: ياڭفەن 18-سىنىپ'],
+    ['seats.noClass', 'تېخى سىنىپ يوق، ئالدى بىلەن سىنىپ باشقۇرۇشتا قۇرۇڭ'],
+    ['seats.classNeed', 'سىنىپ تاللاڭ ياكى نامىنى تولدۇرۇڭ'],
+    ['seats.imported', '{n} ئوقۇغۇچى كىرگۈزۈلدى{extra}'],
+    ['seats.saved', '{n} ئادەم ساقلاندى: {name}'],
+    ['seats.skipH', '({n} ئادەمنىڭ بوي سانلىق مەلۇماتى يوق، كىرگۈزۈلمىدى)'],
+    ['seats.listEmpty', 'بوي تىزىملىكى قۇرۇق'],
+    ['seats.doImport', 'كىرگۈزۈش'],
   ]);
 }
