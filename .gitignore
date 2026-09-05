@@ -14,3 +14,10 @@
 # 签名证书与密钥材料（切勿提交到任何仓库）
 /keys
 /keys/
+
+# 依赖目录（任意层级，含 Windows/、server/ 等子项目）
+node_modules/
+
+# 构建产物
+/RevTechingMaster-Android.apk
+*.hap
