@@ -131,10 +131,14 @@ export class AiService {
   }
 
   private static buildHeader(): Record<string, string> {
-    // 密钥保存在服务端，App 不携带任何 DeepSeek 鉴权；仅可选携带共享令牌
+    // 密钥保存在服务端，App 不携带任何 DeepSeek 鉴权；仅可选携带共享令牌与账号会话
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
     if (ApiConfig.PROXY_TOKEN !== '') {
       h['x-proxy-token'] = ApiConfig.PROXY_TOKEN;
+    }
+    const acctToken: string = AppStorage.get<string>('acctToken') as string || '';
+    if (acctToken !== '') {
+      h['Authorization'] = 'Bearer ' + acctToken;
     }
     return h;
   }

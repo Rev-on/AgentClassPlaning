@@ -27,8 +27,9 @@ const TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 150000);
 const RATE_PER_MIN = Number(process.env.RATE_LIMIT_PER_MIN || 120);
 // 账号体系：AUTH_REQUIRED=true 时，AI 接口要求携带账号令牌
 const AUTH_REQUIRED = process.env.AUTH_REQUIRED === 'true';
-// 华为登录（Account Kit OAuth）：需要在 AGC 控制台获取 APP_SECRET
-const HUAWEI_APP_ID = process.env.HUAWEI_APP_ID || '';
+// 华为登录（Account Kit OAuth）：client_id 取 OAuth 客户端 ID（HUAWEI_CLIENT_ID），
+// 兼容旧字段名 HUAWEI_APP_ID；APP_SECRET 在 AGC 控制台申请
+const HUAWEI_APP_ID = process.env.HUAWEI_CLIENT_ID || process.env.HUAWEI_APP_ID || '';
 const HUAWEI_APP_SECRET = process.env.HUAWEI_APP_SECRET || '';
 const HUAWEI_TOKEN_URL = 'https://oauth-login.cloud.huawei.com/oauth2/v3/token';
 const HUAWEI_USERINFO_URL = 'https://oauth-login.cloud.huawei.com/oauth2/v3/userinfo';
@@ -39,7 +40,7 @@ const app = express();
 app.disable('x-powered-by');
 app.use(cors({
   origin: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-proxy-token']
 }));
 app.use(express.json({ limit: '2mb' }));
@@ -69,7 +70,31 @@ const genToken = () => crypto.randomBytes(32).toString('hex');
 const scryptHash = (pwd, salt) => {
   return crypto.scryptSync(pwd, salt, 32).toString('hex');
 };
-const safeUser = (u) => ({ username: u.username, createdAt: u.createdAt, kind: u.kind || 'account' });
+/** 解码华为 id_token（JWT）载荷，提取可用的用户唯一标识 */
+const decodeJwt = (jwt) => {
+  try {
+    const parts = String(jwt).split('.');
+    if (parts.length < 2) {
+      return {};
+    }
+    let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4 !== 0) {
+      b64 += '=';
+    }
+    const json = Buffer.from(b64, 'base64').toString('utf8');
+    const obj = JSON.parse(json);
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch (e) {
+    return {};
+  }
+};
+const safeUser = (u) => ({
+  username: u.username,
+  createdAt: u.createdAt,
+  kind: u.kind || 'account',
+  nickname: u.nickname || u.username,
+  avatar: u.avatar || ''
+});
 const publicUser = (username) => {
   const u = readUsers().find((x) => x.username === username);
   return u ? safeUser(u) : null;
@@ -117,6 +142,8 @@ app.post('/api/register', (req, res) => {
     salt,
     hash: scryptHash(password, salt),
     kind: 'account',
+    nickname: username,
+    avatar: '',
     huaweiOpenIds: [],
     createdAt: new Date().toISOString()
   });
@@ -155,18 +182,47 @@ app.post('/api/huawei-login', async (req, res) => {
     form.set('code', String(code));
     if (redirectUri) { form.set('redirect_uri', String(redirectUri)); }
     const tokResp = await fetch(HUAWEI_TOKEN_URL, { method: 'POST', body: form });
-    const tok = await tokResp.json();
+    const tokText = await tokResp.text();
+    if (!tokText.trim().startsWith('{')) {
+      console.error('[huawei-login] token resp non-json http=' + tokResp.status +
+        ' bodyHead=' + tokText.slice(0, 160).replace(/\s+/g, ' '));
+      res.status(502).json({ error: { message: '华为授权接口返回异常（非 JSON）' } });
+      return;
+    }
+    const tok = JSON.parse(tokText);
     if (!tok.access_token) {
+      console.error('[huawei-login] token exchange failed, http=' + tokResp.status,
+        'resp=' + JSON.stringify(tok).slice(0, 200));
       res.status(401).json({ error: { message: '华为授权码校验失败' } });
       return;
     }
-    const infoResp = await fetch(HUAWEI_USERINFO_URL + '?access_token=' + encodeURIComponent(tok.access_token));
-    const info = await infoResp.json();
-    const openId = info.openID || info.openid || '';
-    if (!openId) {
-      res.status(401).json({ error: { message: '未能获取华为账号信息' } });
+    // 优先从 token 响应中的 openid/id_token 获取用户唯一标识（不再依赖 userinfo 接口）
+    let openId = '';
+    let profileName = '';
+    let profileAvatar = '';
+    if (typeof tok.openid === 'string' && tok.openid !== '') {
+      openId = tok.openid;
+    } else if (typeof tok.openID === 'string' && tok.openID !== '') {
+      openId = tok.openID;
+    } else if (typeof tok.id_token === 'string' && tok.id_token !== '') {
+      const claims = decodeJwt(tok.id_token);
+      const candidate = claims.openid || claims.openID || claims.unionid || claims.unionID || claims.sub || claims.uid;
+      if (typeof candidate === 'string' && candidate !== '') {
+        openId = candidate;
+      }
+      // 尽量读取华为账号昵称与头像（依赖申请到的 scope 与返回字段）
+      const candName = claims.nickname || claims.nickName || claims.name || claims.displayName || claims.nick_name;
+      if (typeof candName === 'string') { profileName = candName; }
+      const candAvatar = claims.picture || claims.avatar || claims.avatarUrl || claims.photoUrl || claims.headImageUrl;
+      if (typeof candAvatar === 'string') { profileAvatar = candAvatar; }
+    }
+    if (openId === '') {
+      console.error('[huawei-login] token resp missing user id, respKeys=' + Object.keys(tok).join(','));
+      res.status(401).json({ error: { message: '华为授权码校验失败（缺少用户标识）' } });
       return;
     }
+    if (profileName === '' && typeof tok.nick_name === 'string') { profileName = tok.nick_name; }
+    if (profileAvatar === '' && typeof tok.picture === 'string') { profileAvatar = tok.picture; }
     const users = readUsers();
     let u = users.find((x) => (x.huaweiOpenIds || []).includes(openId));
     if (!u) {
@@ -182,14 +238,32 @@ app.post('/api/huawei-login', async (req, res) => {
         salt: '',
         hash: '',
         kind: 'huawei',
+        nickname: profileName !== '' ? profileName : username,
+        avatar: profileAvatar || '',
         huaweiOpenIds: [openId],
         createdAt: new Date().toISOString()
       };
       users.push(u);
       writeUsers(users);
+    } else {
+      // 老账号补充缺失的华为资料（昵称/头像仅在新资料缺失时回填）
+      let changed = false;
+      if (profileName !== '' && (!u.nickname || u.nickname === u.username)) {
+        u.nickname = profileName;
+        changed = true;
+      }
+      if (profileAvatar !== '' && !u.avatar) {
+        u.avatar = profileAvatar;
+        changed = true;
+      }
+      if (changed) {
+        writeUsers(users);
+      }
     }
     res.json(issueSession(u.username));
   } catch (e) {
+    const reason = e && e.message ? String(e.message) : 'unknown';
+    console.error('[huawei-login] exception: ' + reason);
     res.status(502).json({ error: { message: '华为登录服务异常，请稍后再试' } });
   }
 });
@@ -205,6 +279,29 @@ app.post('/api/logout', (req, res) => {
   const token = h.startsWith('Bearer ') ? h.slice(7) : '';
   sessions.delete(token);
   res.json({ ok: true });
+});
+
+// 更新资料：{ nickname?, avatar? }
+app.patch('/api/profile', (req, res) => {
+  const s = authByHeader(req);
+  if (!s) { res.status(401).json({ error: { message: '登录已过期，请重新登录' } }); return; }
+  const body = req.body || {};
+  const users = readUsers();
+  const u = users.find((x) => x.username === s.username);
+  if (!u) { res.status(404).json({ error: { message: '用户不存在' } }); return; }
+  if (typeof body.nickname === 'string') {
+    const nick = body.nickname.trim();
+    if (nick === '' || nick.length > 24) {
+      res.status(400).json({ error: { message: '昵称需为 1-24 个字符' } });
+      return;
+    }
+    u.nickname = nick;
+  }
+  if (typeof body.avatar === 'string') {
+    u.avatar = body.avatar.trim().slice(0, 1024);
+  }
+  writeUsers(users);
+  res.json({ user: publicUser(s.username) });
 });
 // AI 接口可选的账号校验（AUTH_REQUIRED=true 时强制登录）
 function checkSession(req, res, next) {

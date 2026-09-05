@@ -1,0 +1,13 @@
+{
+  "name": "rev-techingmaster-windows",
+  "version": "1.0.0",
+  "description": "Rev TechingMaster 电脑版（Electron）：初中教学备课智能助手",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "AGPL-3.0",
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

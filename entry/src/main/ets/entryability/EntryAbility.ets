@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { AppSettings } from '../common/AppSettings';
 import { AppTheme } from '../common/AppTheme';
+import { AccountStore } from '../common/AccountStore';
 
 const DOMAIN = 0x0000;
 
@@ -41,6 +42,11 @@ export default class EntryAbility extends UIAbility {
     // 并行加载持久化的语言与主题；完成后通过 AppStorage 自动刷新 Splash/Index（不阻塞首屏）
     AppSettings.load(this.context).catch((err: Error) => {
       hilog.error(DOMAIN, 'testTag', 'Failed to load settings. Cause: %{public}s', err.message);
+    });
+
+    // 并行加载账号会话（启动页据此决定进入登录页还是主界面）
+    AccountStore.load(this.context).catch((err: Error) => {
+      hilog.error(DOMAIN, 'testTag', 'Failed to load account. Cause: %{public}s', err.message);
     });
   }
 

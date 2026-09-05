@@ -10,3 +10,7 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+
+# 签名证书与密钥材料（切勿提交到任何仓库）
+/keys
+/keys/

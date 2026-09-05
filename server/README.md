@@ -2,15 +2,54 @@
 
 App 客户端不再内置 DeepSeek API Key，改为请求本服务；本服务持有密钥并向 DeepSeek 转发请求。这样密钥只存在于你自己的云服务器环境变量中，不会随 App 安装包分发。
 
+自 v1.1 起服务端同时承载**账号体系**：注册/登录/退出与华为账号登录的授权码交换（用户数据保存于 `server/data/users.json`，仅本机文件存储）。
+
 ## 目录结构
 
 ```
 server/
-├── src/server.js      代理服务（Express）
+├── src/server.js      代理服务 + 账号接口（Express）
 ├── package.json       依赖与启动脚本
 ├── .env.example       配置模板（复制为 .env）
-└── .gitignore         忽略 .env / node_modules
+├── data/              运行时生成的用户数据（已 gitignore，勿提交）
+└── .gitignore         忽略 .env / node_modules / data
 ```
+
+## 账号接口
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/register` | `{username, password}` 注册（密码 scrypt 加盐哈希存储），返回 `{token, user}` |
+| `POST /api/login` | `{username, password}` 登录，返回 `{token, user}` |
+| `POST /api/huawei-login` | `{code, redirectUri}` 华为授权码换会话（自动创建/匹配账号），返回同上 |
+| `GET /api/me` | 请求头带 `Authorization: Bearer <token>` 校验会话 |
+| `POST /api/logout` | 注销当前令牌 |
+
+- 会话 token 有效期 30 天，保存在内存中，服务重启后需重新登录。
+- `AUTH_REQUIRED=true` 时，`/v1/chat/completions` 与 `/api/chat` 也要求 `Authorization` 携带账号 token；默认 `false` 保持向后兼容。
+
+测试：
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/register -H 'Content-Type: application/json' \
+  -d '{"username":"teacher1","password":"123456"}'
+curl -X POST http://127.0.0.1:3000/api/login -H 'Content-Type: application/json' \
+  -d '{"username":"teacher1","password":"123456"}'
+```
+
+## 华为登录（服务端配置）
+
+App 端采用“授权码 + 服务端换 token”模式：App 内 WebView 打开华为授权页，回调地址带回 `code`，服务端用 `HUAWEI_APP_ID`/`HUAWEI_APP_SECRET` 换取用户 openid 并建立会话。
+
+1. 在 AppGallery Connect 控制台的**认证服务（Auth Service）**页面（该应用客户端 ID `6917615335790825716`）：获取 Client Secret、确认回调地址为 `http://123.60.130.45:3000/api/huawei/cb`。
+2. 服务器 `.env` 填写：
+   ```ini
+   HUAWEI_CLIENT_ID=6917615335790825716
+   HUAWEI_APP_SECRET=获取到的 Client Secret
+   ```
+3. App 端 `ApiConfig.HUAWEI_REDIRECT` 需与 AGC 登记的地址一致（当前默认 `http://123.60.130.45:3000/api/huawei/cb`）。
+
+> 若未配置 Client Secret，App 点击“华为账号登录”会提示“服务端未配置”，账号密码登录不受影响。
 
 ## 本地快速测试
 

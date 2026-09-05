@@ -12,6 +12,7 @@ import common from '@ohos.app.ability.common';
 import { AppTheme } from '../common/AppTheme';
 import { I18n } from '../common/I18n';
 import { AppFonts } from '../common/AppFonts';
+import { AccountStore } from '../common/AccountStore';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
 
 /** 单个粒子 */
@@ -323,9 +324,10 @@ struct Splash {
   }
 
   private goIndex(): void {
-    router.replaceUrl({ url: 'pages/Index' }).catch(() => {
+    const target: string = AccountStore.signedIn() ? 'pages/Index' : 'pages/Login';
+    router.replaceUrl({ url: target }).catch(() => {
       setTimeout(() => {
-        router.replaceUrl({ url: 'pages/Index' }).catch(() => {
+        router.replaceUrl({ url: target }).catch(() => {
           // 再次失败则停留在当前页
         });
       }, 800);

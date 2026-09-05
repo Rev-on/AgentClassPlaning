@@ -8,6 +8,7 @@ import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { AcceptStore } from '../common/AcceptStore';
+import { AccountText } from '../common/AccountText';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
 
 /** 免责声明弹窗：首次启动显示，倒计时 5 秒后方可同意；同意后永久不再显示 */
@@ -388,6 +389,13 @@ struct Index {
             .width('100%')
 
             Grid() {
+              GridItem() {
+                FunCard({
+                  icon: '账', title: AccountText.t('acct.title'), desc: AccountText.t('acct.mine.desc'),
+                  bgColor: '#E8F1FB',
+                  onTap: () => router.pushUrl({ url: 'pages/Account' })
+                })
+              }
               GridItem() {
                 FunCard({
                   icon: '史', title: this.t('card.history'), desc: this.t('card.history.desc'),

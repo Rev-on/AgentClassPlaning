@@ -1,6 +1,7 @@
 {
   "src": [
     "pages/Splash",
+    "pages/Login",
     "pages/Index",
     "pages/Plan",
     "pages/Courseware",
@@ -11,6 +12,7 @@
     "pages/Report",
     "pages/History",
     "pages/Settings",
+    "pages/Account",
     "pages/Seats",
     "pages/ClassManager",
     "pages/ClassDetail"
