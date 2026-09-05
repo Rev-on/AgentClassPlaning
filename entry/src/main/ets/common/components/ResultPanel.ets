@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 通用结果展示组件：渲染 AI 生成结果，提供复制、导出 Word、保存到历史
  * 支持中英双语与深浅主题
  */
@@ -7,6 +7,7 @@ import promptAction from '@ohos.promptAction';
 import common from '@ohos.app.ability.common';
 import { I18n } from '../I18n';
 import { AppTheme } from '../AppTheme';
+import { AppFonts } from '../AppFonts';
 import { MdView } from './MdView';
 import { DocxExporter } from '../DocxExporter';
 
@@ -42,7 +43,7 @@ export struct ResultPanel {
     sysPaste.setData(data).then(() => {
       promptAction.showToast({ message: I18n.t('toast.copied') });
     }).catch(() => {
-      promptAction.showToast({ message: this.appLang === 'en' ? 'Copy failed' : '复制失败，请手动长按选择' });
+      promptAction.showToast({ message: I18n.t('err.copyFail') });
     });
   }
 
@@ -54,7 +55,7 @@ export struct ResultPanel {
     const ctx = getContext(this) as common.UIAbilityContext;
     const safeTitle: string = this.title === '' ? 'Result' : this.title;
     DocxExporter.exportDocx(ctx, this.result, safeTitle + '.docx').catch((err: Error) => {
-      promptAction.showToast({ message: (this.appLang === 'en' ? 'Export failed: ' : '导出失败：') + err.message });
+      promptAction.showToast({ message: I18n.t('err.exportFail') + err.message });
     });
   }
 
@@ -63,17 +64,20 @@ export struct ResultPanel {
       Row() {
         Blank()
         Button(this.t('btn.copy'))
+          .fontFamily(AppFonts.family())
           .fontSize(13)
           .height(30)
           .backgroundColor('#4A90D9')
           .onClick(() => this.copyText())
         Button(this.t('btn.exportWord'))
+          .fontFamily(AppFonts.family())
           .fontSize(13)
           .height(30)
           .backgroundColor('#2F6DB5')
           .margin({ left: 8 })
           .onClick(() => this.exportWord())
         Button(this.t('btn.saveHist'))
+          .fontFamily(AppFonts.family())
           .fontSize(13)
           .height(30)
           .backgroundColor('#5BA8A0')
@@ -90,6 +94,7 @@ export struct ResultPanel {
       Scroll() {
         if (this.result === '') {
           Text('（结果将在这里显示）')
+            .fontFamily(AppFonts.family())
             .fontSize(15)
             .fontColor(this.col('hint'))
             .width('100%')

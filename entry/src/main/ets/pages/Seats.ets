@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 排座位表：输入学生身高与座位布局（排数 × 每排人数）
  *  可选：讲台两边有座位（+2 座：最矮两人坐讲台左、右）
  *  - 优化贪心：身高升序 → 蛇形填充（同排相邻差最小）→ 逐列前后排矫正（前排不高于后排）迭代至稳定
@@ -10,6 +10,7 @@ import promptAction from '@ohos.promptAction';
 import common from '@ohos.app.ability.common';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { HistoryStore } from '../common/HistoryStore';
 import { DocxExporter } from '../common/DocxExporter';
 import { PageHeader } from '../common/components/PageHeader';
@@ -325,7 +326,7 @@ struct Seats {
     sysPaste.setData(data).then(() => {
       promptAction.showToast({ message: I18n.t('toast.copied') });
     }).catch(() => {
-      promptAction.showToast({ message: this.appLang === 'en' ? 'Copy failed' : '复制失败' });
+      promptAction.showToast({ message: I18n.t('err.copyFail') });
     });
   }
 
@@ -336,7 +337,7 @@ struct Seats {
     const ctx = getContext(this) as common.UIAbilityContext;
     DocxExporter.exportDocx(ctx, this.resultText(), this.t('seats.copyName') + '-' + this.rows() + 'x' + this.cols() + '.docx')
       .catch((err: Error) => {
-        promptAction.showToast({ message: (this.appLang === 'en' ? 'Export failed: ' : '导出失败：') + err.message });
+        promptAction.showToast({ message: I18n.t('err.exportFail') + err.message });
       });
   }
 
@@ -382,12 +383,14 @@ struct Seats {
   seatCell(r: number, c: number) {
     Column({ space: 1 }) {
       Text(this.cellName(r, c))
+        .fontFamily(AppFonts.family())
         .fontSize(11)
         .fontWeight(this.cellSelected(r, c) ? FontWeight.Bold : FontWeight.Medium)
         .fontColor(this.cellSelected(r, c) ? '#FFFFFF' : this.col('title'))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
       Text(this.cellHeight(r, c) === '' ? '' : this.cellHeight(r, c) + 'cm')
+        .fontFamily(AppFonts.family())
         .fontSize(9)
         .fontColor(this.cellSelected(r, c) ? '#E6F0FF' : this.col('hint'))
     }
@@ -417,6 +420,7 @@ struct Seats {
       this.seatCell(-1, 0)
       Column() {
         Text(this.t('seats.podium'))
+          .fontFamily(AppFonts.family())
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.col('codeText'))
@@ -442,6 +446,7 @@ struct Seats {
         Column({ space: 12 }) {
           // 算法说明
           Text(this.t('seats.algo'))
+            .fontFamily(AppFonts.family())
             .fontSize(12)
             .fontColor(this.col('hint'))
             .width('100%')
@@ -451,14 +456,18 @@ struct Seats {
           Column({ space: 10 }) {
             Row({ space: 10 }) {
               Text(this.t('seats.rows')).fontSize(15).fontColor(this.col('title')).width(92)
+                .fontFamily(AppFonts.family())
               TextInput({ text: this.rowsText, placeholder: '8' })
+                .fontFamily(AppFonts.family())
                 .type(InputType.Number)
                 .layoutWeight(1)
                 .onChange((v: string) => { this.rowsText = v; })
             }
             Row({ space: 10 }) {
               Text(this.t('seats.cols')).fontSize(15).fontColor(this.col('title')).width(92)
+                .fontFamily(AppFonts.family())
               TextInput({ text: this.colsText, placeholder: '6' })
+                .fontFamily(AppFonts.family())
                 .type(InputType.Number)
                 .layoutWeight(1)
                 .onChange((v: string) => { this.colsText = v; })
@@ -472,6 +481,7 @@ struct Seats {
                   this.autoRegen();
                 })
               Text(this.t('seats.side'))
+                .fontFamily(AppFonts.family())
                 .fontSize(14)
                 .fontColor(this.col('title'))
             }
@@ -480,7 +490,9 @@ struct Seats {
             if (this.sideOn) {
               Row({ space: 10 }) {
                 Text(this.t('seats.sideL')).fontSize(14).fontColor(this.col('title')).width(88)
+                  .fontFamily(AppFonts.family())
                 TextInput({ text: this.sideLName, placeholder: this.t('seats.phSide') })
+                  .fontFamily(AppFonts.family())
                   .layoutWeight(1)
                   .backgroundColor(this.col('inputBg'))
                   .fontColor(this.col('text'))
@@ -493,7 +505,9 @@ struct Seats {
               .width('100%')
               Row({ space: 10 }) {
                 Text(this.t('seats.sideR')).fontSize(14).fontColor(this.col('title')).width(88)
+                  .fontFamily(AppFonts.family())
                 TextInput({ text: this.sideRName, placeholder: this.t('seats.phSide') })
+                  .fontFamily(AppFonts.family())
                   .layoutWeight(1)
                   .backgroundColor(this.col('inputBg'))
                   .fontColor(this.col('text'))
@@ -506,7 +520,9 @@ struct Seats {
               .width('100%')
             }
             Text(this.t('seats.students')).fontSize(15).fontColor(this.col('title')).width('100%')
+              .fontFamily(AppFonts.family())
             TextArea({ text: this.studentText, placeholder: this.t('seats.phStudents') })
+              .fontFamily(AppFonts.family())
               .width('100%')
               .height(140)
               .backgroundColor(this.col('inputBg'))
@@ -514,6 +530,7 @@ struct Seats {
               .placeholderColor(this.col('hint'))
               .onChange((v: string) => { this.studentText = v; })
             Button(this.t('seats.gen'))
+              .fontFamily(AppFonts.family())
               .width('100%')
               .height(42)
               .backgroundColor('#D97706')
@@ -532,6 +549,7 @@ struct Seats {
                 this.sideRow()
               } else {
                 Text(this.t('seats.podium'))
+                  .fontFamily(AppFonts.family())
                   .fontSize(12)
                   .fontColor(this.col('codeText'))
                   .backgroundColor(this.col('codeBg'))
@@ -550,6 +568,7 @@ struct Seats {
               .borderRadius(14)
 
               Text(this.t('seats.tip'))
+                .fontFamily(AppFonts.family())
                 .fontSize(12)
                 .fontColor(this.col('hint'))
                 .width('100%')
@@ -557,18 +576,21 @@ struct Seats {
               // 结果操作
               Row({ space: 8 }) {
                 Button(this.t('btn.copy'))
+                  .fontFamily(AppFonts.family())
                   .fontSize(13)
                   .height(32)
                   .layoutWeight(1)
                   .backgroundColor('#4A90D9')
                   .onClick(() => this.copyResult())
                 Button(this.t('btn.exportWord'))
+                  .fontFamily(AppFonts.family())
                   .fontSize(13)
                   .height(32)
                   .layoutWeight(1)
                   .backgroundColor('#2F6DB5')
                   .onClick(() => this.exportWord())
                 Button(this.t('btn.saveHist'))
+                  .fontFamily(AppFonts.family())
                   .fontSize(13)
                   .height(32)
                   .layoutWeight(1)

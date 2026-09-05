@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 班级管理：班级列表（新建/重命名/删除/进入详情）
  */
 import router from '@ohos.router';
@@ -7,6 +7,7 @@ import common from '@ohos.app.ability.common';
 import { ClassStore, ClassItem } from '../common/ClassStore';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 
 @Entry
@@ -115,18 +116,21 @@ struct ClassManager {
         // 新建 / 重命名
         Row({ space: 8 }) {
           TextInput({ text: this.inputName, placeholder: this.t('cls.namePh') })
+            .fontFamily(AppFonts.family())
             .layoutWeight(1)
             .backgroundColor(this.col('inputBg'))
             .fontColor(this.col('text'))
             .placeholderColor(this.col('hint'))
             .onChange((v: string) => { this.inputName = v; })
           Button(this.editId >= 0 ? this.t('cls.saveName') : this.t('cls.new'))
+            .fontFamily(AppFonts.family())
             .fontSize(14)
             .height(40)
             .backgroundColor('#4A90D9')
             .onClick(() => this.saveName())
           if (this.editId >= 0) {
             Button(this.t('btn.close'))
+              .fontFamily(AppFonts.family())
               .fontSize(13)
               .height(40)
               .backgroundColor(this.col('headBg'))
@@ -138,6 +142,7 @@ struct ClassManager {
 
         if (this.classes.length === 0) {
           Text(this.t('cls.empty'))
+            .fontFamily(AppFonts.family())
             .fontSize(14)
             .fontColor(this.col('hint'))
             .width('100%')
@@ -150,24 +155,28 @@ struct ClassManager {
                 Row({ space: 10 }) {
                   Column({ space: 4 }) {
                     Text(item.name)
+                      .fontFamily(AppFonts.family())
                       .fontSize(16)
                       .fontWeight(FontWeight.Bold)
                       .fontColor(this.col('title'))
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
                     Text(this.t('cls.students').replace('{n}', item.students.length.toString()))
+                      .fontFamily(AppFonts.family())
                       .fontSize(12)
                       .fontColor(this.col('hint'))
                   }
                   .alignItems(HorizontalAlign.Start)
                   .layoutWeight(1)
                   Button(this.t('cls.rename'))
+                    .fontFamily(AppFonts.family())
                     .fontSize(12)
                     .height(30)
                     .backgroundColor(this.col('headBg'))
                     .fontColor(this.col('sub'))
                     .onClick(() => this.beginRename(item))
                   Button(this.t('cls.del'))
+                    .fontFamily(AppFonts.family())
                     .fontSize(12)
                     .height(30)
                     .backgroundColor('#FDE8E8')

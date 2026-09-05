@@ -87,7 +87,7 @@ export class AiService {
   private static async requestOnce(systemPrompt: string, userPrompt: string): Promise<string> {
     const httpRequest = http.createHttp();
     try {
-      const response = await httpRequest.request(ApiConfig.BASE_URL, {
+      const response = await httpRequest.request(ApiConfig.activeBaseUrl(), {
         method: http.RequestMethod.POST,
         header: AiService.buildHeader(),
         extraData: AiService.buildBody(systemPrompt, userPrompt),
@@ -131,10 +131,12 @@ export class AiService {
   }
 
   private static buildHeader(): Record<string, string> {
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + ApiConfig.API_KEY
-    };
+    // 密钥保存在服务端，App 不携带任何 DeepSeek 鉴权；仅可选携带共享令牌
+    const h: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (ApiConfig.PROXY_TOKEN !== '') {
+      h['x-proxy-token'] = ApiConfig.PROXY_TOKEN;
+    }
+    return h;
   }
 
   private static buildBody(systemPrompt: string, userPrompt: string): string {

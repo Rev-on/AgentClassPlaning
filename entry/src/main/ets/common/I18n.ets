@@ -1,10 +1,15 @@
 /**
- * 全局双语（中文/English）文本管理
- * 语言状态存放于 AppStorage('appLang')：'zh' | 'en'
+ * 全局多语言文本管理（中文/English/维吾尔语/藏语/蒙古语）
+ * 语言状态存放于 AppStorage('appLang')：'zh' | 'en' | 'ug' | 'bo' | 'mn'
  * 页面用法：
  *   @StorageProp('appLang') appLang: string = 'zh';
  *   private t(key: string): string { void this.appLang; return I18n.t(key); }
+ * 说明：少数民族语言词典个别键缺失时自动回退到中文，避免界面出现裸键名。
  */
+import { UyghurDict } from './UyghurDict';
+import { TibetanDict } from './TibetanDict';
+import { MongolianDict } from './MongolianDict';
+
 export class I18n {
   static readonly LANG_KEY: string = 'appLang';
 
@@ -182,7 +187,38 @@ export class I18n {
     ['rm.ph0', '如：学科 + 教学困惑，如：学生计算能力弱，想研究...'],
     ['rm.ph1', '如：论文主题，如：基于项目式学习的实验教学研究'],
     ['rm.ph2', '如：粘贴论文摘要原文'],
-    ['label.pasteNote', '数据预览（第一行为表头）']
+    ['label.pasteNote', '数据预览（第一行为表头）'],
+    ['langName.zh', '简体中文'],
+    ['langName.en', '英语'],
+    ['langName.ug', '维吾尔语'],
+    ['langName.bo', '藏语'],
+    ['langName.mn', '蒙古语'],
+    ['toast.lang', '语言已切换为 {lang}'],
+    ['err.noTopic', '请填写课题名称'],
+    ['err.noName', '请填写学生姓名'],
+    ['err.noContent', '请先输入内容'],
+    ['err.noSituation', '请填写学生情况描述'],
+    ['err.genFail', '生成失败：'],
+    ['err.copyFail', '复制失败'],
+    ['err.exportFail', '导出失败：'],
+    ['err.noFile', '未选择文件或文件无数据'],
+    ['err.noExcelData', '请粘贴至少包含表头和一行的 Excel 数据'],
+    ['err.importFail', '导入失败：'],
+    ['err.openBrowser', '无法打开浏览器'],
+    ['toast.imported', '已导入 {n} 行数据'],
+    ['ph.reportName', '如：李同学'],
+    ['ph.reportClass', '如：八年级2班'],
+    ['talk.situationDesc', '学生情况描述（说明沟通中遇到的困难）'],
+    ['talk.s1', '学习退步沟通'],
+    ['talk.s2', '课堂表现反馈'],
+    ['talk.s3', '作业问题沟通'],
+    ['talk.s4', '考试后安抚'],
+    ['talk.s5', '家长会发言'],
+    ['talk.t1', '温和沟通'],
+    ['talk.t2', '正式规范'],
+    ['talk.t3', '激励引导'],
+    ['splash.l1', '教学如此简单，'],
+    ['splash.l2', '可惜你才知道']
   ]);
 
   private static readonly en: Map<string, string> = new Map<string, string>([
@@ -359,20 +395,74 @@ export class I18n {
     ['rm.ph0', 'e.g. Subject + puzzle, e.g. students weak at calculation...'],
     ['rm.ph1', 'e.g. Paper topic, e.g. project-based physics experiment teaching'],
     ['rm.ph2', 'e.g. Paste the abstract to polish'],
-    ['label.pasteNote', 'Preview (first row = header)']
+    ['label.pasteNote', 'Preview (first row = header)'],
+    ['langName.zh', 'Simplified Chinese'],
+    ['langName.en', 'English'],
+    ['langName.ug', 'Uyghur'],
+    ['langName.bo', 'Tibetan'],
+    ['langName.mn', 'Mongolian'],
+    ['toast.lang', 'Language switched to {lang}'],
+    ['err.noTopic', 'Please enter a topic'],
+    ['err.noName', 'Please enter the student name'],
+    ['err.noContent', 'Please enter content first'],
+    ['err.noSituation', 'Please describe the student situation'],
+    ['err.genFail', 'Failed: '],
+    ['err.copyFail', 'Copy failed'],
+    ['err.exportFail', 'Export failed: '],
+    ['err.noFile', 'No file selected or no data'],
+    ['err.noExcelData', 'Please paste Excel data with at least a header and one row'],
+    ['err.importFail', 'Import failed: '],
+    ['err.openBrowser', 'Cannot open the browser'],
+    ['toast.imported', '{n} row(s) imported'],
+    ['ph.reportName', 'e.g. Student Name'],
+    ['ph.reportClass', 'e.g. Class 2, Grade 8'],
+    ['talk.situationDesc', 'Student situation (describe the difficulty in communication)'],
+    ['talk.s1', 'Discuss falling grades'],
+    ['talk.s2', 'Classroom behavior feedback'],
+    ['talk.s3', 'Homework issues'],
+    ['talk.s4', 'After-exam reassurance'],
+    ['talk.s5', 'Parents meeting talk'],
+    ['talk.t1', 'Warm and gentle'],
+    ['talk.t2', 'Formal and professional'],
+    ['talk.t3', 'Encouraging and guiding'],
+    ['splash.l1', 'Teaching, this simple.'],
+    ['splash.l2', "if only you'd known sooner."]
   ]);
 
-  /** 读取当前语言：'zh' | 'en' */
+  /** 读取当前语言：'zh' | 'en' | 'ug' | 'bo' | 'mn'（默认 zh） */
   static currentLang(): string {
     const v = AppStorage.get<string>(I18n.LANG_KEY);
-    return v === 'en' ? 'en' : 'zh';
+    if (v === 'en' || v === 'ug' || v === 'bo' || v === 'mn') {
+      return v;
+    }
+    return 'zh';
   }
 
-  /** 按 key 取当前语言文本 */
+  /** 按语言代码取对应词典 */
+  private static pick(lang: string): Map<string, string> {
+    if (lang === 'en') {
+      return I18n.en;
+    }
+    if (lang === 'ug') {
+      return UyghurDict.dict;
+    }
+    if (lang === 'bo') {
+      return TibetanDict.dict;
+    }
+    if (lang === 'mn') {
+      return MongolianDict.dict;
+    }
+    return I18n.zh;
+  }
+
+  /** 按 key 取当前语言文本；少数民族语言缺词时回退中文 */
   static t(key: string): string {
     const lang: string = I18n.currentLang();
-    const dict: Map<string, string> = lang === 'en' ? I18n.en : I18n.zh;
-    const text: string | undefined = dict.get(key);
+    const dict: Map<string, string> = I18n.pick(lang);
+    let text: string | undefined = dict.get(key);
+    if (text === undefined && dict !== I18n.zh) {
+      text = I18n.zh.get(key);
+    }
     return text !== undefined ? text : key;
   }
 }

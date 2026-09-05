@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 班级详情：学生名单管理（增删）与 Excel / Word 名单导入
  * 所有改动即时保存到本机，不上云
  */
@@ -9,6 +9,7 @@ import { ClassStore, ClassItem, StudentItem } from '../common/ClassStore';
 import { ClassImport } from '../common/ClassImport';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 
 @Entry
@@ -167,6 +168,7 @@ struct ClassDetail {
             Column({ space: 8 }) {
               Row({ space: 8 }) {
                 TextInput({ text: this.cur.name, placeholder: this.t('cls.namePh') })
+                  .fontFamily(AppFonts.family())
                   .layoutWeight(1)
                   .backgroundColor(this.col('inputBg'))
                   .fontColor(this.col('text'))
@@ -175,6 +177,7 @@ struct ClassDetail {
                     this.cur = { id: this.cur.id, name: v, students: this.cur.students };
                   })
                 Button(this.t('cls.saveName'))
+                  .fontFamily(AppFonts.family())
                   .fontSize(13)
                   .height(40)
                   .backgroundColor('#4A90D9')
@@ -182,6 +185,7 @@ struct ClassDetail {
               }
               .width('100%')
               Text(this.t('cls.students').replace('{n}', this.cur.students.length.toString()))
+                .fontFamily(AppFonts.family())
                 .fontSize(12)
                 .fontColor(this.col('sub'))
                 .width('100%')
@@ -195,15 +199,18 @@ struct ClassDetail {
             // 导入
             Column({ space: 8 }) {
               Button(this.t('cls.importBtn'))
+                .fontFamily(AppFonts.family())
                 .width('100%')
                 .height(40)
                 .backgroundColor('#D97706')
                 .onClick(() => this.doImport())
               Text(this.t('cls.importHint'))
+                .fontFamily(AppFonts.family())
                 .fontSize(12)
                 .fontColor(this.col('hint'))
                 .width('100%')
               Text(this.t('mine.local'))
+                .fontFamily(AppFonts.family())
                 .fontSize(11)
                 .fontColor(this.col('faint'))
                 .width('100%')
@@ -218,12 +225,14 @@ struct ClassDetail {
             Column({ space: 8 }) {
               Row({ space: 8 }) {
                 TextInput({ text: this.inName, placeholder: this.t('cls.colName') })
+                  .fontFamily(AppFonts.family())
                   .layoutWeight(1.4)
                   .backgroundColor(this.col('inputBg'))
                   .fontColor(this.col('text'))
                   .placeholderColor(this.col('hint'))
                   .onChange((v: string) => { this.inName = v; })
                 TextInput({ text: this.inHeight, placeholder: this.t('cls.colHeight') })
+                  .fontFamily(AppFonts.family())
                   .layoutWeight(1)
                   .type(InputType.Number)
                   .backgroundColor(this.col('inputBg'))
@@ -231,6 +240,7 @@ struct ClassDetail {
                   .placeholderColor(this.col('hint'))
                   .onChange((v: string) => { this.inHeight = v; })
                 Button(this.t('cls.add'))
+                  .fontFamily(AppFonts.family())
                   .fontSize(13)
                   .height(40)
                   .backgroundColor('#3E9B6F')
@@ -248,14 +258,19 @@ struct ClassDetail {
             Column({ space: 6 }) {
               Row() {
                 Text(this.t('cls.colNo')).fontSize(12).fontColor(this.col('hint')).layoutWeight(0.8)
+                  .fontFamily(AppFonts.family())
                 Text(this.t('cls.colName')).fontSize(12).fontColor(this.col('hint')).layoutWeight(1.4)
+                  .fontFamily(AppFonts.family())
                 Text(this.t('cls.colHeight')).fontSize(12).fontColor(this.col('hint')).layoutWeight(1)
+                  .fontFamily(AppFonts.family())
                 Text('').layoutWeight(0.6)
+                  .fontFamily(AppFonts.family())
               }
               .width('100%')
 
               if (this.cur.students.length === 0) {
                 Text(this.t('cls.noStudents'))
+                  .fontFamily(AppFonts.family())
                   .fontSize(13)
                   .fontColor(this.col('hint'))
                   .width('100%')
@@ -265,9 +280,13 @@ struct ClassDetail {
                 ForEach(this.cur.students, (stu: StudentItem, idx: number) => {
                   Row() {
                     Text(stu.no === '' ? '-' : stu.no).fontSize(13).fontColor(this.col('sub')).layoutWeight(0.8)
+                      .fontFamily(AppFonts.family())
                     Text(stu.name).fontSize(14).fontColor(this.col('title')).layoutWeight(1.4)
+                      .fontFamily(AppFonts.family())
                     Text(stu.height === '' ? '-' : stu.height).fontSize(13).fontColor(this.col('sub')).layoutWeight(1)
+                      .fontFamily(AppFonts.family())
                     Button(this.t('cls.del'))
+                      .fontFamily(AppFonts.family())
                       .fontSize(11)
                       .height(26)
                       .backgroundColor('#FDE8E8')

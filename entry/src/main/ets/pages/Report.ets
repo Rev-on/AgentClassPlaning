@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 个性化学情报告：输入学生成绩与课堂观察，AI 生成给家长的学情报告（双语界面 + 深浅主题）
  */
 import common from '@ohos.app.ability.common';
@@ -8,6 +8,7 @@ import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
@@ -36,7 +37,7 @@ struct Report {
 
   async generate(): Promise<void> {
     if (this.studentName.trim() === '') {
-      promptAction.showToast({ message: this.appLang === 'en' ? 'Please enter the student name' : '请填写学生姓名' });
+      promptAction.showToast({ message: this.t('err.noName') });
       return;
     }
     this.loading = true;
@@ -49,7 +50,7 @@ struct Report {
       });
       this.result = content;
     } catch (e) {
-      promptAction.showToast({ message: (this.appLang === 'en' ? 'Failed: ' : '生成失败：') + (e as Error).message });
+      promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
@@ -75,9 +76,10 @@ struct Report {
       Column({ space: 10 }) {
         Row({ space: 10 }) {
           Text(this.t('label.student')).fontSize(15).fontColor(this.col('title')).width(86)
+            .fontFamily(AppFonts.family())
           TextInput({
             text: this.studentName,
-            placeholder: this.appLang === 'en' ? 'e.g. Student Name' : '如：李同学'
+            placeholder: this.t('ph.reportName')
           })
             .layoutWeight(1)
             .height(42)
@@ -86,9 +88,10 @@ struct Report {
         .width('100%')
         Row({ space: 10 }) {
           Text(this.t('label.class')).fontSize(15).fontColor(this.col('title')).width(86)
+            .fontFamily(AppFonts.family())
           TextInput({
             text: this.className,
-            placeholder: this.appLang === 'en' ? 'e.g. Class 2, Grade 8' : '如：八年级2班'
+            placeholder: this.t('ph.reportClass')
           })
             .layoutWeight(1)
             .height(42)
@@ -96,35 +99,42 @@ struct Report {
         }
         .width('100%')
         Text(this.t('label.grades'))
+          .fontFamily(AppFonts.family())
           .fontSize(13)
           .fontColor(this.col('title'))
           .width('100%')
         TextArea({ text: this.grades, placeholder: this.t('ph.scores') })
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(70)
           .fontSize(13)
           .onChange((v: string) => { this.grades = v; })
         Text(this.t('label.observation'))
+          .fontFamily(AppFonts.family())
           .fontSize(13)
           .fontColor(this.col('title'))
           .width('100%')
         TextArea({ text: this.observation, placeholder: this.t('ph.observation') })
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(80)
           .fontSize(13)
           .onChange((v: string) => { this.observation = v; })
 
         Text(this.t('label.remark'))
+          .fontFamily(AppFonts.family())
           .fontSize(12)
           .fontColor(this.col('hint'))
           .width('100%')
         TextInput({ text: this.remark, placeholder: this.t('ph.remark') })
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
 
         Button(this.loading ? this.t('gen.loading') : this.t('act.report'))
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(44)
           .backgroundColor(this.loading ? '#9DB8D9' : '#4A90D9')
@@ -142,6 +152,7 @@ struct Report {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#4A90D9')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+            .fontFamily(AppFonts.family())
         }.width('100%').justifyContent(FlexAlign.Center).padding(20)
       } else if (this.result !== '') {
         ResultPanel({
@@ -155,6 +166,7 @@ struct Report {
       } else {
         Row() {
           Text(this.t('hint.safety'))
+            .fontFamily(AppFonts.family())
             .fontSize(12)
             .fontColor(this.col('hint'))
             .lineHeight(18)

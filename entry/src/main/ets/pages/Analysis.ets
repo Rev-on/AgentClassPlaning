@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 学情分析与报告：粘贴 Excel 成绩数据（Tab 分隔），AI 生成学情分析报告
  * 用法：在 Excel 中框选数据区域 → Ctrl+C 复制 → 长按本页输入框粘贴
  * 双语界面 + 深浅主题
@@ -10,6 +10,7 @@ import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { ExcelParser } from '../common/ExcelParser';
 import { ExcelFileImporter } from '../common/ExcelFileImporter';
 import { PageHeader } from '../common/components/PageHeader';
@@ -54,23 +55,21 @@ struct Analysis {
       const ctx = getContext(this) as common.UIAbilityContext;
       const rows: string[][] = await ExcelFileImporter.pickAndParse(ctx);
       if (rows.length === 0) {
-        promptAction.showToast({ message: this.appLang === 'en' ? 'No file selected or no data' : '未选择文件或文件无数据' });
+        promptAction.showToast({ message: this.t('err.noFile') });
         return;
       }
       this.excelText = ExcelFileImporter.toTabText(rows);
       this.refreshPreview();
-      promptAction.showToast({ message: (this.appLang === 'en' ? 'Imported ' : '已导入 ') +
-        (rows.length - 1) + (this.appLang === 'en' ? ' row(s)' : ' 行数据') });
+      promptAction.showToast({ message: this.t('toast.imported').replace('{n}', (rows.length - 1).toString()) });
     } catch (e) {
-      promptAction.showToast({ message: (this.appLang === 'en' ? 'Import failed: ' : '导入失败：') + (e as Error).message });
+      promptAction.showToast({ message: this.t('err.importFail') + (e as Error).message });
     }
   }
 
   async generate(): Promise<void> {
     const rows: string[][] = ExcelParser.parse(this.excelText);
     if (rows.length < 2) {
-      promptAction.showToast({ message: this.appLang === 'en' ?
-        'Please paste Excel data with at least a header and one row' : '请粘贴至少包含表头和一行的 Excel 数据' });
+      promptAction.showToast({ message: this.t('err.noExcelData') });
       return;
     }
     this.loading = true;
@@ -83,7 +82,7 @@ struct Analysis {
       });
       this.result = content;
     } catch (e) {
-      promptAction.showToast({ message: (this.appLang === 'en' ? 'Failed: ' : '生成失败：') + (e as Error).message });
+      promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
@@ -110,11 +109,13 @@ struct Analysis {
         Row() {
           Column({ space: 2 }) {
             Text(this.t('excel.title'))
+              .fontFamily(AppFonts.family())
               .fontSize(14)
               .fontWeight(FontWeight.Bold)
               .fontColor(this.col('title'))
               .width('100%')
             Text(this.t('excel.sub'))
+              .fontFamily(AppFonts.family())
               .fontSize(12)
               .fontColor(this.col('sub'))
               .width('100%')
@@ -122,6 +123,7 @@ struct Analysis {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
           Button(this.t('excel.import'))
+            .fontFamily(AppFonts.family())
             .fontSize(13)
             .height(34)
             .backgroundColor('#3E948A')
@@ -131,6 +133,7 @@ struct Analysis {
         }
         .width('100%')
         TextArea({ text: this.excelText, placeholder: this.t('ph.excel') })
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(120)
           .fontSize(13)
@@ -142,10 +145,12 @@ struct Analysis {
         if (this.previewRows.length > 0) {
           Column({ space: 4 }) {
             Text(this.t('excel.preview').replace('{n}', String(this.previewRows.length - 1)))
+              .fontFamily(AppFonts.family())
               .fontSize(12)
               .fontColor('#4A90D9')
               .width('100%')
             Text(this.t('label.pasteNote'))
+              .fontFamily(AppFonts.family())
               .fontSize(11)
               .fontColor(this.col('hint'))
               .width('100%')
@@ -153,6 +158,7 @@ struct Analysis {
             Row() {
               ForEach(this.previewRows[0], (h: string) => {
                 Text(h)
+                  .fontFamily(AppFonts.family())
                   .fontSize(12)
                   .fontWeight(FontWeight.Bold)
                   .fontColor(this.col('title'))
@@ -169,6 +175,7 @@ struct Analysis {
               Row() {
                 ForEach(row, (c: string) => {
                   Text(c)
+                    .fontFamily(AppFonts.family())
                     .fontSize(12)
                     .fontColor(this.col('text'))
                     .layoutWeight(1)
@@ -189,16 +196,19 @@ struct Analysis {
         }
 
         Text(this.t('label.remark'))
+          .fontFamily(AppFonts.family())
           .fontSize(12)
           .fontColor(this.col('hint'))
           .width('100%')
         TextInput({ text: this.remark, placeholder: this.t('ph.remark') })
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
 
         Button(this.loading ? this.t('gen.loading') : this.t('act.analysis'))
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(44)
           .backgroundColor(this.loading ? '#8FBDB6' : '#3E948A')
@@ -216,6 +226,7 @@ struct Analysis {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#3E948A')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+            .fontFamily(AppFonts.family())
         }.width('100%').justifyContent(FlexAlign.Center).padding(20)
       } else if (this.result !== '') {
         ResultPanel({
@@ -229,6 +240,7 @@ struct Analysis {
       } else {
         Row() {
           Text(this.t('hint.safety'))
+            .fontFamily(AppFonts.family())
             .fontSize(12)
             .fontColor(this.col('hint'))
             .lineHeight(18)

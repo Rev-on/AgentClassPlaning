@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 教研科研辅助：选题建议 / 论文大纲 / 摘要润色 三种模式（双语界面 + 深浅主题）
  */
 import common from '@ohos.app.ability.common';
@@ -8,6 +8,7 @@ import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
@@ -71,7 +72,7 @@ struct Research {
 
   async generate(): Promise<void> {
     if (this.input.trim() === '') {
-      promptAction.showToast({ message: this.appLang === 'en' ? 'Please enter content first' : '请先输入内容' });
+      promptAction.showToast({ message: this.t('err.noContent') });
       return;
     }
     this.loading = true;
@@ -83,7 +84,7 @@ struct Research {
       });
       this.result = content;
     } catch (e) {
-      promptAction.showToast({ message: (this.appLang === 'en' ? 'Failed: ' : '生成失败：') + (e as Error).message });
+      promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
@@ -110,6 +111,7 @@ struct Research {
       Row({ space: 8 }) {
         ForEach(this.modeNames(), (name: string, index: number) => {
           Button(name)
+            .fontFamily(AppFonts.family())
             .fontSize(14)
             .fontColor(this.mode === index ? '#FFFFFF' : this.col('sub'))
             .backgroundColor(this.mode === index ? '#7B61C2' : this.col('card'))
@@ -127,22 +129,26 @@ struct Research {
       // 输入区
       Column({ space: 10 }) {
         TextArea({ text: this.input, placeholder: this.placeholders()[this.mode] })
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(120)
           .fontSize(15)
           .onChange((v: string) => { this.input = v; })
 
         Text(this.t('label.remark'))
+          .fontFamily(AppFonts.family())
           .fontSize(12)
           .fontColor(this.col('hint'))
           .width('100%')
         TextInput({ text: this.remark, placeholder: this.t('ph.remark') })
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
 
         Button(this.loading ? this.t('gen.loading') : this.t('act.research'))
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(44)
           .backgroundColor(this.loading ? '#B3A3D9' : '#7B61C2')
@@ -160,6 +166,7 @@ struct Research {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#7B61C2')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+            .fontFamily(AppFonts.family())
         }.width('100%').justifyContent(FlexAlign.Center).padding(20)
       } else if (this.result !== '') {
         ResultPanel({
@@ -173,6 +180,7 @@ struct Research {
       } else {
         Row() {
           Text(this.t('hint.common'))
+            .fontFamily(AppFonts.family())
             .fontSize(12)
             .fontColor(this.col('hint'))
             .lineHeight(18)
@@ -185,6 +193,7 @@ struct Research {
 
       // 底部红色呼吸闪烁水印
       Text(this.t('research.wm'))
+        .fontFamily(AppFonts.family())
         .fontSize(10)
         .fontColor('#E11D48')
         .width('100%')

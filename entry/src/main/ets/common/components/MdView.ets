@@ -1,9 +1,10 @@
-/**
+﻿/**
  * 轻量 Markdown 渲染组件（零第三方依赖）
  * 支持标题、段落、列表、代码块、表格等块级结构
  * 行内样式以纯文本呈现，提示词模板已禁止 AI 输出行内标记
  */
 import { AppTheme } from '../AppTheme';
+import { AppFonts } from '../AppFonts';
 
 /** 块级元素 */
 interface MdBlock {
@@ -150,6 +151,7 @@ export struct MdView {
       Row() {
         ForEach(headers, (h: string) => {
           Text(h)
+            .fontFamily(AppFonts.family())
             .fontSize(13)
             .fontWeight(FontWeight.Bold)
             .fontColor(this.col('title'))
@@ -165,6 +167,7 @@ export struct MdView {
         Row() {
           ForEach(row, (c: string) => {
             Text(c)
+              .fontFamily(AppFonts.family())
               .fontSize(13)
               .fontColor(this.col('text'))
               .layoutWeight(1)
@@ -186,10 +189,12 @@ export struct MdView {
   listItem(text: string, ordered: boolean, index: number) {
     Row({ space: 6 }) {
       Text(ordered ? (index + 1) + '.' : '•')
+        .fontFamily(AppFonts.family())
         .fontSize(14)
         .fontColor('#4A90D9')
         .width(18)
       Text(text)
+        .fontFamily(AppFonts.family())
         .fontSize(14)
         .fontColor(this.col('text'))
         .lineHeight(22)
@@ -204,6 +209,7 @@ export struct MdView {
       ForEach(MdParser.parse(this.markdown), (block: MdBlock, index: number) => {
         if (block.kind === 'heading') {
           Text(block.text !== undefined ? block.text : '')
+            .fontFamily(AppFonts.family())
             .fontSize(this.headingSize(block.level !== undefined ? block.level : 2))
             .fontWeight(FontWeight.Bold)
             .fontColor(this.col('title'))
@@ -211,6 +217,7 @@ export struct MdView {
             .margin({ top: 6 })
         } else if (block.kind === 'paragraph') {
           Text(block.text !== undefined ? block.text : '')
+            .fontFamily(AppFonts.family())
             .fontSize(15)
             .fontColor(this.col('text'))
             .lineHeight(24)
@@ -218,6 +225,7 @@ export struct MdView {
             .textSelectable(TextSelectableMode.SELECTABLE_UNFOCUSABLE)
         } else if (block.kind === 'code') {
           Text(block.text !== undefined ? block.text : '')
+            .fontFamily(AppFonts.family())
             .fontSize(13)
             .fontColor(this.col('codeText'))
             .fontFamily('monospace')

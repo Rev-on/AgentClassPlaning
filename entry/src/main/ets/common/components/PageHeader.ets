@@ -1,12 +1,14 @@
-/**
+﻿/**
  * 通用页面标题栏：返回按钮 + 标题（支持深浅主题）
  */
 import router from '@ohos.router';
 import { AppTheme } from '../AppTheme';
+import { AppFonts } from '../AppFonts';
+import { VerticalMongolianText } from './VerticalMongolianText';
 
 @Component
 export struct PageHeader {
-  title: string = '';
+  @Prop title: string = '';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
 
   private col(key: string): string {
@@ -17,6 +19,7 @@ export struct PageHeader {
   build() {
     Row({ space: 10 }) {
       Button('←')
+        .fontFamily(AppFonts.family())
         .fontSize(18)
         .fontColor(this.col('title'))
         .backgroundColor(this.col('card'))
@@ -26,10 +29,12 @@ export struct PageHeader {
         .onClick(() => {
           router.back();
         })
-      Text(this.title)
-        .fontSize(20)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(this.col('title'))
+      VerticalMongolianText({
+        content: this.title,
+        textSize: 20,
+        textColor: this.col('title'),
+        isBold: true
+      })
     }
     .width('100%')
     .padding({ left: 4, right: 4, top: 6, bottom: 6 })

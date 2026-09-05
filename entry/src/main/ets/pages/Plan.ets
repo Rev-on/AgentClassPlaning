@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 教案生成：输入课题信息，AI 生成结构化完整教案（双语界面 + 深浅主题）
  */
 import common from '@ohos.app.ability.common';
@@ -8,6 +8,7 @@ import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
@@ -37,7 +38,7 @@ struct Plan {
 
   async generate(): Promise<void> {
     if (this.topic.trim() === '') {
-      promptAction.showToast({ message: this.appLang === 'en' ? 'Please enter a topic' : '请填写课题名称' });
+      promptAction.showToast({ message: this.t('err.noTopic') });
       return;
     }
     this.loading = true;
@@ -50,7 +51,7 @@ struct Plan {
       });
       this.result = content;
     } catch (e) {
-      promptAction.showToast({ message: (this.appLang === 'en' ? 'Failed: ' : '生成失败：') + (e as Error).message });
+      promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
@@ -76,7 +77,9 @@ struct Plan {
       Column({ space: 10 }) {
         Row({ space: 10 }) {
           Text(this.t('label.subject')).fontSize(15).fontColor(this.col('title')).width(86)
+            .fontFamily(AppFonts.family())
           TextInput({ text: this.subject, placeholder: this.t('ph.subject') })
+            .fontFamily(AppFonts.family())
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.subject = v; })
@@ -84,7 +87,9 @@ struct Plan {
         .width('100%')
         Row({ space: 10 }) {
           Text(this.t('label.version')).fontSize(15).fontColor(this.col('title')).width(86)
+            .fontFamily(AppFonts.family())
           TextInput({ text: this.version, placeholder: this.t('ph.version') })
+            .fontFamily(AppFonts.family())
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.version = v; })
@@ -92,7 +97,9 @@ struct Plan {
         .width('100%')
         Row({ space: 10 }) {
           Text(this.t('label.grade')).fontSize(15).fontColor(this.col('title')).width(86)
+            .fontFamily(AppFonts.family())
           TextInput({ text: this.grade, placeholder: this.t('ph.grade') })
+            .fontFamily(AppFonts.family())
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.grade = v; })
@@ -100,7 +107,9 @@ struct Plan {
         .width('100%')
         Row({ space: 10 }) {
           Text(this.t('label.topic')).fontSize(15).fontColor(this.col('title')).width(86)
+            .fontFamily(AppFonts.family())
           TextInput({ text: this.topic, placeholder: this.t('ph.topic') })
+            .fontFamily(AppFonts.family())
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.topic = v; })
@@ -108,23 +117,28 @@ struct Plan {
         .width('100%')
         Row({ space: 10 }) {
           Text(this.t('label.period')).fontSize(15).fontColor(this.col('title')).width(86)
+            .fontFamily(AppFonts.family())
           TextInput({ text: this.period, placeholder: this.t('ph.period') })
+            .fontFamily(AppFonts.family())
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.period = v; })
         }
         .width('100%')
         Text(this.t('label.remark'))
+          .fontFamily(AppFonts.family())
           .fontSize(12)
           .fontColor(this.col('hint'))
           .width('100%')
         TextInput({ text: this.remark, placeholder: this.t('ph.remark') })
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
 
         Button(this.loading ? this.t('gen.loading') : this.t('act.plan'))
+          .fontFamily(AppFonts.family())
           .width('100%')
           .height(44)
           .backgroundColor(this.loading ? '#9DB8D9' : '#4A90D9')
@@ -142,6 +156,7 @@ struct Plan {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#4A90D9')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+            .fontFamily(AppFonts.family())
         }.width('100%').justifyContent(FlexAlign.Center).padding(20)
       } else if (this.result !== '') {
         ResultPanel({
@@ -155,6 +170,7 @@ struct Plan {
       } else {
         Row() {
           Text(this.t('hint.common'))
+            .fontFamily(AppFonts.family())
             .fontSize(12)
             .fontColor(this.col('hint'))
             .lineHeight(18)

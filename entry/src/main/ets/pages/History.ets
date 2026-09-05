@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 历史记录页：展示全部已保存的生成记录（支持中英双语与深浅主题）
  */
 import common from '@ohos.app.ability.common';
@@ -6,6 +6,7 @@ import promptAction from '@ohos.promptAction';
 import { HistoryStore, HistoryRecord } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { MdView } from '../common/components/MdView';
 
@@ -31,6 +32,7 @@ struct HistoryDetailDialog {
   build() {
     Column({ space: 12 }) {
       Text(this.title)
+        .fontFamily(AppFonts.family())
         .fontSize(17)
         .fontWeight(FontWeight.Bold)
         .fontColor(this.col('title'))
@@ -38,6 +40,7 @@ struct HistoryDetailDialog {
       Scroll() {
         if (this.content === '') {
           Text('No content')
+            .fontFamily(AppFonts.family())
             .fontSize(14)
             .fontColor(this.col('hint'))
         } else {
@@ -52,6 +55,7 @@ struct HistoryDetailDialog {
       .padding(10)
       .scrollBar(BarState.Auto)
       Button(this.t('btn.close'))
+        .fontFamily(AppFonts.family())
         .width('100%')
         .backgroundColor('#4A90D9')
         .onClick(() => {
@@ -130,10 +134,12 @@ struct History {
 
       Row() {
         Text(this.t('hist.count').replace('{n}', this.records.length.toString()))
+          .fontFamily(AppFonts.family())
           .fontSize(13)
           .fontColor(this.col('sub'))
         Blank()
         Button(this.t('btn.clear'))
+          .fontFamily(AppFonts.family())
           .fontSize(13)
           .height(30)
           .backgroundColor(this.col('headBg'))
@@ -157,9 +163,11 @@ struct History {
       if (this.records.length === 0) {
         Column({ space: 8 }) {
           Text(this.t('hist.empty'))
+            .fontFamily(AppFonts.family())
             .fontSize(15)
             .fontColor(this.col('hint'))
           Text(this.t('hist.hint'))
+            .fontFamily(AppFonts.family())
             .fontSize(12)
             .fontColor(this.col('faint'))
         }
@@ -172,6 +180,7 @@ struct History {
             ListItem() {
               Row({ space: 12 }) {
                 Text(record.type)
+                  .fontFamily(AppFonts.family())
                   .fontSize(12)
                   .fontColor('#2B4C7E')
                   .backgroundColor('#E8F1FB')
@@ -179,18 +188,21 @@ struct History {
                   .padding({ left: 8, right: 8, top: 4, bottom: 4 })
                 Column({ space: 4 }) {
                   Text(record.title)
+                    .fontFamily(AppFonts.family())
                     .fontSize(15)
                     .fontWeight(FontWeight.Medium)
                     .fontColor(this.col('title'))
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text(record.time)
+                    .fontFamily(AppFonts.family())
                     .fontSize(11)
                     .fontColor(this.col('hint'))
                 }
                 .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
                 Text(this.t('hist.view'))
+                  .fontFamily(AppFonts.family())
                   .fontSize(13)
                   .fontColor('#4A90D9')
               }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 启动屏（粒子版）：
  *  1) 读取主题对应的前景图（foreground/foreground1），采样像素并拆解为彩色粒子
  *  2) 启动时粒子自屏幕外随机飞入，缓动汇聚成中央图案（肉眼无感拼接）
@@ -10,6 +10,9 @@ import display from '@ohos.display';
 import { image } from '@kit.ImageKit';
 import common from '@ohos.app.ability.common';
 import { AppTheme } from '../common/AppTheme';
+import { I18n } from '../common/I18n';
+import { AppFonts } from '../common/AppFonts';
+import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
 
 /** 单个粒子 */
 interface Particle {
@@ -66,6 +69,7 @@ struct Splash {
   private initTimer: number = -1;
 
   aboutToAppear(): void {
+    this.ensureFonts();
     // 响应式字号与画布
     try {
       const disp = display.getDefaultDisplaySync();
@@ -93,6 +97,30 @@ struct Splash {
     this.tickTimer = setInterval(() => {
       this.animateFrame();
     }, 16);
+  }
+
+  /** 注册内置少数民族字体（进程内仅执行一次；失败不阻塞界面，文字可回退系统字体） */
+  private ensureFonts(): void {
+    if (AppStorage.get<boolean>('revFontsReg') === true) {
+      return;
+    }
+    try {
+      this.getUIContext().getFont().registerFont({
+        familyName: AppFonts.TIBETAN,
+        familySrc: $rawfile('fonts/ctrc-uchen.ttf')
+      });
+      this.getUIContext().getFont().registerFont({
+        familyName: AppFonts.UYGHUR,
+        familySrc: $rawfile('fonts/UKIJMejT.ttf')
+      });
+      this.getUIContext().getFont().registerFont({
+        familyName: AppFonts.MONGOLIAN,
+        familySrc: $rawfile('fonts/c8abb3845e34a252fcf04f0cd4e74a00.ttf')
+      });
+    } catch (e) {
+      // 注册失败时回退系统字体，不影响启动
+    }
+    AppStorage.setOrCreate('revFontsReg', true);
   }
 
   aboutToDisappear(): void {
@@ -310,17 +338,13 @@ struct Splash {
   }
 
   private slogan1(): string {
-    if (this.appLang === 'en') {
-      return 'Teaching, this simple.';
-    }
-    return '教学如此简单，';
+    void this.appLang;
+    return I18n.t('splash.l1');
   }
 
   private slogan2(): string {
-    if (this.appLang === 'en') {
-      return "if only you'd known sooner.";
-    }
-    return '可惜你才知道';
+    void this.appLang;
+    return I18n.t('splash.l2');
   }
 
   build() {
@@ -331,22 +355,27 @@ struct Splash {
           .layoutWeight(0.55)
           .width('100%')
         Text('Rev TechingMaster')
+          .fontFamily(AppFonts.family())
           .fontSize(this.subSize + 3)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.col('hint'))
           .letterSpacing(2)
         Column({ space: 8 }) {
-          Text(this.slogan1())
-            .fontSize(this.mainSize)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.col('title'))
-            .letterSpacing(1)
-          Text(this.slogan2())
-            .fontSize(this.mainSize)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.col('title'))
-            .letterSpacing(1)
-            .margin({ left: '13%' })
+          VerticalMongolianText({
+            content: this.slogan1(),
+            textSize: this.mainSize,
+            textColor: this.col('title'),
+            isBold: true,
+            letterSpacingNum: 1
+          })
+          VerticalMongolianText({
+            content: this.slogan2(),
+            textSize: this.mainSize,
+            textColor: this.col('title'),
+            isBold: true,
+            letterSpacingNum: 1,
+            marginLeftPct: 13
+          })
         }
         .width('100%')
         .alignItems(HorizontalAlign.Center)
@@ -370,6 +399,7 @@ struct Splash {
           .layoutWeight(0.9)
           .width('100%')
         Text('v1.0.0 · AGPL-3.0')
+          .fontFamily(AppFonts.family())
           .fontSize(11)
           .fontColor(this.col('faint'))
           .padding({ bottom: 26 })

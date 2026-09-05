@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 主界面：底部三 Tab（支持中英双语与深浅主题）
  *  备课助手 / 家校沟通 / 我的（历史记录、设置等入口）
  */
@@ -6,7 +6,9 @@ import router from '@ohos.router';
 import common from '@ohos.app.ability.common';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
+import { AppFonts } from '../common/AppFonts';
 import { AcceptStore } from '../common/AcceptStore';
+import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
 
 /** 免责声明弹窗：首次启动显示，倒计时 5 秒后方可同意；同意后永久不再显示 */
 @CustomDialog
@@ -67,24 +69,30 @@ struct DisclaimerDialog {
 
   build() {
     Column({ space: 14 }) {
-      Text(this.t('dlg.title'))
-        .fontSize(18)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(this.col('title'))
-        .width('100%')
-      Text(this.t('dlg.body'))
-        .fontSize(14)
-        .fontColor(this.col('text'))
-        .lineHeight(23)
-        .width('100%')
+      VerticalMongolianText({
+        content: this.t('dlg.title'),
+        textSize: 18,
+        textColor: this.col('title'),
+        isBold: true,
+        fillWidth: true
+      })
+      VerticalMongolianText({
+        content: this.t('dlg.body'),
+        textSize: 14,
+        textColor: this.col('text'),
+        fillWidth: true
+      })
       if (this.remain > 0) {
-        Text(this.t('dlg.count').replace('{n}', this.remain.toString()))
-          .fontSize(12)
-          .fontColor(this.col('hint'))
-          .width('100%')
+        VerticalMongolianText({
+          content: this.t('dlg.count').replace('{n}', this.remain.toString()),
+          textSize: 12,
+          textColor: this.col('hint'),
+          fillWidth: true
+        })
       }
       Row({ space: 10 }) {
         Button(this.t('dlg.agree'))
+          .fontFamily(AppFonts.family())
           .fontSize(14)
           .height(40)
           .layoutWeight(1)
@@ -93,6 +101,7 @@ struct DisclaimerDialog {
           .opacity(this.remain === 0 ? 1 : 0.45)
           .onClick(() => this.onAgree())
         Button(this.t('dlg.disagree'))
+          .fontFamily(AppFonts.family())
           .fontSize(14)
           .height(40)
           .layoutWeight(1)
@@ -132,6 +141,7 @@ struct FunCard {
   build() {
     Column({ space: 8 }) {
       Text(this.icon)
+        .fontFamily(AppFonts.family())
         .fontSize(20)
         .fontWeight(FontWeight.Bold)
         .fontColor('#2B4C7E')
@@ -140,16 +150,18 @@ struct FunCard {
         .textAlign(TextAlign.Center)
         .backgroundColor(this.bgColor)
         .borderRadius(12)
-      Text(this.title)
-        .fontSize(16)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(this.col('title'))
-      Text(this.desc)
-        .fontSize(12)
-        .fontColor(this.col('hint'))
-        .textAlign(TextAlign.Center)
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      VerticalMongolianText({
+        content: this.title,
+        textSize: 16,
+        textColor: this.col('title'),
+        isBold: true
+      })
+      VerticalMongolianText({
+        content: this.desc,
+        textSize: 12,
+        textColor: this.col('hint'),
+        centerText: true
+      })
     }
     .width('100%')
     .padding(14)
@@ -171,6 +183,7 @@ struct Index {
   });
 
   aboutToAppear(): void {
+    this.ensureFonts();
     // 首次进入（未同意过免责声明）时弹出使用须知
     const ctx = getContext(this) as common.UIAbilityContext;
     AcceptStore.getAccepted(ctx).then((acc: boolean) => {
@@ -179,6 +192,30 @@ struct Index {
       }
     }).catch(() => {
     });
+  }
+
+  /** 注册内置少数民族字体（进程内仅执行一次；失败不阻塞界面） */
+  private ensureFonts(): void {
+    if (AppStorage.get<boolean>('revFontsReg') === true) {
+      return;
+    }
+    try {
+      this.getUIContext().getFont().registerFont({
+        familyName: AppFonts.TIBETAN,
+        familySrc: $rawfile('fonts/ctrc-uchen.ttf')
+      });
+      this.getUIContext().getFont().registerFont({
+        familyName: AppFonts.UYGHUR,
+        familySrc: $rawfile('fonts/UKIJMejT.ttf')
+      });
+      this.getUIContext().getFont().registerFont({
+        familyName: AppFonts.MONGOLIAN,
+        familySrc: $rawfile('fonts/c8abb3845e34a252fcf04f0cd4e74a00.ttf')
+      });
+    } catch (e) {
+      // 注册失败时回退系统字体
+    }
+    AppStorage.setOrCreate('revFontsReg', true);
   }
 
   private t(key: string): string {
@@ -199,13 +236,17 @@ struct Index {
           Column({ space: 14 }) {
             Row() {
               Column({ space: 4 }) {
-                Text(this.t('tab.assistant'))
-                  .fontSize(22)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.col('title'))
-                Text(this.t('sub.assistant'))
-                  .fontSize(12)
-                  .fontColor(this.col('hint'))
+                VerticalMongolianText({
+                  content: this.t('tab.assistant'),
+                  textSize: 22,
+                  textColor: this.col('title'),
+                  isBold: true
+                })
+                VerticalMongolianText({
+                  content: this.t('sub.assistant'),
+                  textSize: 12,
+                  textColor: this.col('hint')
+                })
               }
               .alignItems(HorizontalAlign.Start)
               Blank()
@@ -276,13 +317,17 @@ struct Index {
           Column({ space: 14 }) {
             Row() {
               Column({ space: 4 }) {
-                Text(this.t('tab.family'))
-                  .fontSize(22)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.col('title'))
-                Text(this.t('sub.family'))
-                  .fontSize(12)
-                  .fontColor(this.col('hint'))
+                VerticalMongolianText({
+                  content: this.t('tab.family'),
+                  textSize: 22,
+                  textColor: this.col('title'),
+                  isBold: true
+                })
+                VerticalMongolianText({
+                  content: this.t('sub.family'),
+                  textSize: 12,
+                  textColor: this.col('hint')
+                })
               }
               .alignItems(HorizontalAlign.Start)
               Blank()
@@ -325,13 +370,17 @@ struct Index {
           Column({ space: 14 }) {
             Row() {
               Column({ space: 4 }) {
-                Text(this.t('tab.mine'))
-                  .fontSize(22)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(this.col('title'))
-                Text(this.t('sub.mine'))
-                  .fontSize(12)
-                  .fontColor(this.col('hint'))
+                VerticalMongolianText({
+                  content: this.t('tab.mine'),
+                  textSize: 22,
+                  textColor: this.col('title'),
+                  isBold: true
+                })
+                VerticalMongolianText({
+                  content: this.t('sub.mine'),
+                  textSize: 12,
+                  textColor: this.col('hint')
+                })
               }
               .alignItems(HorizontalAlign.Start)
               Blank()
@@ -366,12 +415,13 @@ struct Index {
             .rowsGap(12)
             .width('100%')
 
-            Text(this.t('mine.local'))
-              .fontSize(11)
-              .fontColor(this.col('faint'))
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .padding({ top: 10 })
+            VerticalMongolianText({
+              content: this.t('mine.local'),
+              textSize: 11,
+              textColor: this.col('faint'),
+              fillWidth: true,
+              centerText: true
+            })
           }
           .width('100%')
           .padding(16)

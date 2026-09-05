@@ -1,6 +1,6 @@
 /**
  * 应用设置：语言与主题的读取、持久化与应用
- *  - appLang:  'zh' | 'en'                       （AppStorage）
+ *  - appLang:  'zh' | 'en' | 'ug' | 'bo' | 'mn'   （AppStorage）
  *  - appTheme: 'light' | 'dark' | 'system'       （AppStorage）
  *  - appResolvedTheme: 'light' | 'dark'          （AppStorage，实际生效）
  */
@@ -24,7 +24,7 @@ export class AppSettings {
       const store = await preferences.getPreferences(context, AppSettings.STORE);
       const lv = await store.get(AppSettings.KEY_LANG, 'zh');
       const tv = await store.get(AppSettings.KEY_THEME, 'light');
-      lang = (lv as string) === 'en' ? 'en' : 'zh';
+      lang = AppSettings.normalizeLang(lv as string);
       const t = tv as string;
       theme = (t === 'dark' || t === 'system') ? t : 'light';
     } catch (e) {
@@ -51,6 +51,14 @@ export class AppSettings {
     const store = await preferences.getPreferences(context, AppSettings.STORE);
     await store.put(AppSettings.KEY_AGREED, true);
     await store.flush();
+  }
+
+  /** 语言代码白名单校验（非法值回退中文） */
+  private static normalizeLang(lang: string): string {
+    if (lang === 'zh' || lang === 'en' || lang === 'ug' || lang === 'bo' || lang === 'mn') {
+      return lang;
+    }
+    return 'zh';
   }
 
   /** 保存语言并立即生效 */
