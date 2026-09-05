@@ -1,9 +1,8 @@
 import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { window } from '@kit.ArkUI';
+import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 import { AppSettings } from '../common/AppSettings';
 import { AppTheme } from '../common/AppTheme';
-import { AccountStore } from '../common/AccountStore';
 
 const DOMAIN = 0x0000;
 
@@ -37,16 +36,18 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
+      // 软键盘避让设为“压缩模式”，避免键盘弹出时整页被整体上抬（默认 OFFSET 上抬模式）
+      // 该模式下 Page 高度被压缩，输入框固定悬于键盘上方，聊天/表单体验更符合直觉
+      try {
+        windowStage.getMainWindowSync().getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+      } catch (e) {
+        hilog.warn(DOMAIN, 'testTag', 'setKeyboardAvoidMode failed. Cause: %{public}s', JSON.stringify(e));
+      }
     });
 
     // 并行加载持久化的语言与主题；完成后通过 AppStorage 自动刷新 Splash/Index（不阻塞首屏）
     AppSettings.load(this.context).catch((err: Error) => {
       hilog.error(DOMAIN, 'testTag', 'Failed to load settings. Cause: %{public}s', err.message);
-    });
-
-    // 并行加载账号会话（启动页据此决定进入登录页还是主界面）
-    AccountStore.load(this.context).catch((err: Error) => {
-      hilog.error(DOMAIN, 'testTag', 'Failed to load account. Cause: %{public}s', err.message);
     });
   }
 

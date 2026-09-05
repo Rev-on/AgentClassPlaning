@@ -19,6 +19,8 @@ struct Settings {
   @StorageLink('appLang') appLang: string = 'zh';
   @StorageLink('appTheme') appTheme: string = 'light';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  /** 生成结果自动保存到历史（默认开） */
+  @StorageLink('autoSaveHist') autoSave: boolean = true;
 
   private t(key: string): string {
     void this.appLang;
@@ -121,6 +123,14 @@ struct Settings {
     });
   }
 
+  /** 切换“自动保存到历史” */
+  private switchAutoSave(on: boolean): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    AppSettings.saveAutoSave(ctx, on).then(() => {
+      // 开关即时生效，无需额外提示
+    });
+  }
+
   /** 打开系统浏览器访问开源仓库，鼓励用户点亮 Star */
   private openRepo(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
@@ -183,6 +193,39 @@ struct Settings {
                 const themes: string[] = ['light', 'dark', 'system'];
                 this.switchTheme(themes[index]);
               })
+          }
+          .width('100%')
+          .padding(16)
+          .backgroundColor(this.col('card'))
+          .borderRadius(14)
+          .alignItems(HorizontalAlign.Start)
+
+          // 自动保存到历史
+          Column({ space: 10 }) {
+            Row({ space: 8 }) {
+              Column({ space: 4 }) {
+                Text(this.t('set.autoSaveHistory'))
+                  .fontFamily(AppFonts.family())
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.col('title'))
+                  .width('100%')
+                Text(this.t('set.autoSaveHint'))
+                  .fontFamily(AppFonts.family())
+                  .fontSize(12)
+                  .fontColor(this.col('hint'))
+                  .lineHeight(18)
+                  .width('100%')
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.autoSave })
+                .selectedColor('#4A90D9')
+                .onChange((isOn: boolean) => {
+                  this.switchAutoSave(isOn);
+                })
+            }
+            .width('100%')
           }
           .width('100%')
           .padding(16)

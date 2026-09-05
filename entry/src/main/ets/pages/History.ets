@@ -3,10 +3,12 @@
  */
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
+import pasteboard from '@ohos.pasteboard';
 import { HistoryStore, HistoryRecord } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
+import { DocxExporter } from '../common/DocxExporter';
 import { PageHeader } from '../common/components/PageHeader';
 import { MdView } from '../common/components/MdView';
 
@@ -27,6 +29,30 @@ struct HistoryDetailDialog {
   private col(key: string): string {
     void this.resolvedTheme;
     return AppTheme.color(key, this.resolvedTheme);
+  }
+
+  private copyContent(): void {
+    if (this.content === '') {
+      return;
+    }
+    const sysPaste = pasteboard.getSystemPasteboard();
+    const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.content);
+    sysPaste.setData(data).then(() => {
+      promptAction.showToast({ message: I18n.t('toast.copied') });
+    }).catch(() => {
+      promptAction.showToast({ message: I18n.t('err.copyFail') });
+    });
+  }
+
+  private exportContent(): void {
+    if (this.content === '') {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const safeTitle: string = this.title === '' ? 'History' : this.title;
+    DocxExporter.exportDocx(ctx, this.content, safeTitle + '.docx').catch((err: Error) => {
+      promptAction.showToast({ message: I18n.t('err.exportFail') + err.message });
+    });
   }
 
   build() {
@@ -54,6 +80,23 @@ struct HistoryDetailDialog {
       .borderRadius(10)
       .padding(10)
       .scrollBar(BarState.Auto)
+      Row({ space: 10 }) {
+        Button(this.t('btn.exportWord'))
+          .fontFamily(AppFonts.family())
+          .fontSize(14)
+          .height(40)
+          .layoutWeight(1)
+          .backgroundColor('#2F6DB5')
+          .onClick(() => this.exportContent())
+        Button(this.t('btn.copy'))
+          .fontFamily(AppFonts.family())
+          .fontSize(14)
+          .height(40)
+          .layoutWeight(1)
+          .backgroundColor('#4A90D9')
+          .onClick(() => this.copyContent())
+      }
+      .width('100%')
       Button(this.t('btn.close'))
         .fontFamily(AppFonts.family())
         .width('100%')

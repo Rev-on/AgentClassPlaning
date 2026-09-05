@@ -15,10 +15,10 @@ import { ResultPanel } from '../common/components/ResultPanel';
 @Entry
 @Component
 struct Courseware {
-  @State subject: string = '物理';
-  @State grade: string = '八年级';
-  @State topic: string = '光的反射';
-  @State usage: string = '新授课';
+  @State subject: string = I18n.t('def.subject');
+  @State grade: string = I18n.t('def.grade');
+  @State topic: string = I18n.t('def.topic');
+  @State usage: string = I18n.t('def.usage');
   @State remark: string = '';
   @State loading: boolean = false;
   @State result: string = '';
@@ -49,11 +49,27 @@ struct Courseware {
         this.result = partial;
       }, true);
       this.result = content;
+      this.autoSaveHistory();
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
+  }
+
+  /** 自动保存到历史（开关开启且内容非空时静默保存） */
+  private autoSaveHistory(): void {
+    if (this.result === '') {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const typeLabel: string = I18n.t('page.courseware');
+    HistoryStore.autoAdd(ctx, {
+      type: typeLabel,
+      title: typeLabel + '-' + this.topic,
+      content: this.result,
+      time: HistoryStore.formatNow()
+    });
   }
 
   saveToHistory(): void {
@@ -152,7 +168,10 @@ struct Courseware {
           result: this.result,
           type: I18n.t('page.courseware'),
           title: I18n.t('page.courseware') + '-' + this.topic,
-          onSave: () => this.saveToHistory()
+          onSave: () => this.saveToHistory(),
+          onEdited: (t: string): void => {
+            this.result = t;
+          }
         })
           .layoutWeight(1)
           .padding(16)

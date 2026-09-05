@@ -19,10 +19,7 @@ import { ResultPanel } from '../common/components/ResultPanel';
 @Entry
 @Component
 struct Analysis {
-  @State excelText: string = '姓名\t语文\t数学\t英语\t物理\t班级均分\t考试\n' +
-    '李同学\t88\t92\t85\t90\t82\t期中\n' +
-    '王同学\t75\t68\t72\t70\t82\t期中\n' +
-    '张同学\t60\t55\t58\t52\t82\t期中';
+  @State excelText: string = I18n.t('def.excel');
   @State remark: string = '';
   @State previewRows: string[][] = [];
   @State loading: boolean = false;
@@ -81,11 +78,27 @@ struct Analysis {
         this.result = partial;
       });
       this.result = content;
+      this.autoSaveHistory();
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
+  }
+
+  /** 自动保存到历史（开关开启且内容非空时静默保存） */
+  private autoSaveHistory(): void {
+    if (this.result === '') {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const typeLabel: string = I18n.t('page.analysis');
+    HistoryStore.autoAdd(ctx, {
+      type: typeLabel,
+      title: typeLabel + '-' + HistoryStore.formatNow().slice(5, 10),
+      content: this.result,
+      time: HistoryStore.formatNow()
+    });
   }
 
   saveToHistory(): void {
@@ -233,7 +246,10 @@ struct Analysis {
           result: this.result,
           type: I18n.t('page.analysis'),
           title: I18n.t('page.analysis') + '-' + HistoryStore.formatNow().slice(5, 10),
-          onSave: () => this.saveToHistory()
+          onSave: () => this.saveToHistory(),
+          onEdited: (t: string): void => {
+            this.result = t;
+          }
         })
           .layoutWeight(1)
           .padding(16)

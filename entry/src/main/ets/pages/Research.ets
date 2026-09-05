@@ -83,11 +83,27 @@ struct Research {
         this.result = partial;
       });
       this.result = content;
+      this.autoSaveHistory();
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
+  }
+
+  /** 自动保存到历史（开关开启且内容非空时静默保存） */
+  private autoSaveHistory(): void {
+    if (this.result === '') {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const typeLabel: string = I18n.t('page.research');
+    HistoryStore.autoAdd(ctx, {
+      type: typeLabel,
+      title: typeLabel + '-' + this.input.slice(0, 12),
+      content: this.result,
+      time: HistoryStore.formatNow()
+    });
   }
 
   saveToHistory(): void {
@@ -173,7 +189,10 @@ struct Research {
           result: this.result,
           type: I18n.t('page.research'),
           title: I18n.t('page.research') + '-' + this.input.slice(0, 12),
-          onSave: () => this.saveToHistory()
+          onSave: () => this.saveToHistory(),
+          onEdited: (t: string): void => {
+            this.result = t;
+          }
         })
           .layoutWeight(1)
           .padding(16)

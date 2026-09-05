@@ -33,9 +33,16 @@ export class HistoryStore {
     }
   }
 
-  /** 新增一条记录（超过 50 条自动裁掉最旧的） */
-  static async addRecord(context: common.UIAbilityContext, record: HistoryRecord): Promise<void> {
+  /** 新增一条记录（超过 50 条自动裁掉最旧的）
+   * 去重：与最新一条同标题同内容时不再重复入库（自动保存后手动再点保存不会产生重复）
+   * @returns 是否真正写入（false=重复跳过）
+   */
+  static async addRecord(context: common.UIAbilityContext, record: HistoryRecord): Promise<boolean> {
     const records = await HistoryStore.getRecords(context);
+    const latest: HistoryRecord | undefined = records.length > 0 ? records[0] : undefined;
+    if (latest !== undefined && latest.title === record.title && latest.content === record.content) {
+      return false;
+    }
     records.unshift(record);
     if (records.length > HistoryStore.MAX) {
       records.splice(HistoryStore.MAX, records.length - HistoryStore.MAX);
@@ -43,6 +50,21 @@ export class HistoryStore {
     const store = await preferences.getPreferences(context, HistoryStore.STORE_NAME);
     await store.put(HistoryStore.KEY, JSON.stringify(records));
     await store.flush();
+    return true;
+  }
+
+  /** “自动保存到历史”开关是否开启（AppStorage 缓存，默认开） */
+  static autoSaveEnabled(): boolean {
+    const v: boolean = AppStorage.get<boolean>('autoSaveHist') as boolean;
+    return v !== false;
+  }
+
+  /** 生成完成后自动保存（仅开关开启时生效；静默，无 toast；重复内容自动跳过） */
+  static async autoAdd(context: common.UIAbilityContext, record: HistoryRecord): Promise<void> {
+    if (!HistoryStore.autoSaveEnabled()) {
+      return;
+    }
+    await HistoryStore.addRecord(context, record);
   }
 
   /** 清空全部历史记录 */

@@ -7,11 +7,11 @@
         "material": {
           "certpath": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001BEA1276EB45510C6DDD465BFAB86FCC78EB5F26CAC28D63ACF567526900AA70C4494ABAEACFF21B",
+          "keyPassword": "0000001B8222969C9ADE8397B45A90F12297ABF0830B9F919E207B9AF5CDEE3FD1393FE610E331FAB0665F",
           "profile": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.p12",
-          "storePassword": "0000001B036415818A818C17D734AA6884581C7E6D4AFB526AB85DAFB1F331F7469A9176A04E63999B68C5"
+          "storePassword": "0000001B59C4865602CB738A4413A2C1E4B98F766A19B88EBD339CC956F5CD888C2E415B99CF8FDC493AE8"
         }
       }
     ],

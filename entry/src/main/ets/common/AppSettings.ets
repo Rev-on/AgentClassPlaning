@@ -15,23 +15,28 @@ export class AppSettings {
   private static readonly KEY_LANG: string = 'appLang';
   private static readonly KEY_THEME: string = 'appTheme';
   private static readonly KEY_AGREED: string = 'disclaimerAgreed';
+  private static readonly KEY_AUTOSAVE: string = 'autoSaveHist';
 
   /** 启动时加载持久化设置并应用（含 colorMode） */
   static async load(context: common.UIAbilityContext): Promise<void> {
     let lang: string = 'zh';
     let theme: string = 'light';
+    let autoSave: boolean = true;
     try {
       const store = await preferences.getPreferences(context, AppSettings.STORE);
       const lv = await store.get(AppSettings.KEY_LANG, 'zh');
       const tv = await store.get(AppSettings.KEY_THEME, 'light');
+      const av = await store.get(AppSettings.KEY_AUTOSAVE, true);
       lang = AppSettings.normalizeLang(lv as string);
       const t = tv as string;
       theme = (t === 'dark' || t === 'system') ? t : 'light';
+      autoSave = (av as boolean) !== false;
     } catch (e) {
       // 默认值
     }
     AppStorage.setOrCreate(I18n.LANG_KEY, lang);
     AppStorage.setOrCreate(AppTheme.THEME_KEY, theme);
+    AppStorage.setOrCreate(AppSettings.KEY_AUTOSAVE, autoSave);
     AppSettings.applyColorMode(context, theme);
   }
 
@@ -76,6 +81,14 @@ export class AppSettings {
     await store.flush();
     AppStorage.setOrCreate(AppTheme.THEME_KEY, theme);
     AppSettings.applyColorMode(context, theme);
+  }
+
+  /** 保存“自动保存到历史”开关并立即生效 */
+  static async saveAutoSave(context: common.UIAbilityContext, on: boolean): Promise<void> {
+    const store = await preferences.getPreferences(context, AppSettings.STORE);
+    await store.put(AppSettings.KEY_AUTOSAVE, on);
+    await store.flush();
+    AppStorage.setOrCreate(AppSettings.KEY_AUTOSAVE, on);
   }
 
   /** 应用系统颜色模式并计算实际生效主题 */

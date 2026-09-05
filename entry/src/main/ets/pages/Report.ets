@@ -15,10 +15,10 @@ import { ResultPanel } from '../common/components/ResultPanel';
 @Entry
 @Component
 struct Report {
-  @State studentName: string = '李同学';
-  @State className: string = '八年级2班';
-  @State grades: string = '语文 88（班级均分 82）、数学 92（班级均分 78）、英语 85（班级均分 80）、物理 90（班级均分 76）';
-  @State observation: string = '课堂积极发言，作业完成质量高；性格开朗，与同学相处融洽。最近一次周测物理满分，数学进步明显。';
+  @State studentName: string = I18n.t('def.studentName');
+  @State className: string = I18n.t('def.className');
+  @State grades: string = I18n.t('def.grades');
+  @State observation: string = I18n.t('def.observation');
   @State remark: string = '';
   @State loading: boolean = false;
   @State result: string = '';
@@ -49,11 +49,27 @@ struct Report {
         this.result = partial;
       });
       this.result = content;
+      this.autoSaveHistory();
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
+  }
+
+  /** 自动保存到历史（开关开启且内容非空时静默保存） */
+  private autoSaveHistory(): void {
+    if (this.result === '') {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const typeLabel: string = I18n.t('page.report');
+    HistoryStore.autoAdd(ctx, {
+      type: typeLabel,
+      title: typeLabel + '-' + this.studentName,
+      content: this.result,
+      time: HistoryStore.formatNow()
+    });
   }
 
   saveToHistory(): void {
@@ -159,7 +175,10 @@ struct Report {
           result: this.result,
           type: I18n.t('page.report'),
           title: I18n.t('page.report') + '-' + this.studentName,
-          onSave: () => this.saveToHistory()
+          onSave: () => this.saveToHistory(),
+          onEdited: (t: string): void => {
+            this.result = t;
+          }
         })
           .layoutWeight(1)
           .padding(16)

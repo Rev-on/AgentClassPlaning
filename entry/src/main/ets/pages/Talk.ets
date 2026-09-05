@@ -92,11 +92,27 @@ struct Talk {
         this.result = partial;
       });
       this.result = content;
+      this.autoSaveHistory();
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
+  }
+
+  /** 自动保存到历史（开关开启且内容非空时静默保存） */
+  private autoSaveHistory(): void {
+    if (this.result === '') {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const typeLabel: string = I18n.t('page.talk');
+    HistoryStore.autoAdd(ctx, {
+      type: typeLabel,
+      title: typeLabel + '-' + this.sceneLabel(),
+      content: this.result,
+      time: HistoryStore.formatNow()
+    });
   }
 
   saveToHistory(): void {
@@ -191,7 +207,10 @@ struct Talk {
           result: this.result,
           type: I18n.t('page.talk'),
           title: I18n.t('page.talk') + '-' + this.sceneLabel(),
-          onSave: () => this.saveToHistory()
+          onSave: () => this.saveToHistory(),
+          onEdited: (t: string): void => {
+            this.result = t;
+          }
         })
           .layoutWeight(1)
           .padding(16)

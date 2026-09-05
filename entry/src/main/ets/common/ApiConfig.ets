@@ -9,14 +9,10 @@
  *    若服务器未设置令牌，请保持本字段为空字符串。
  */
 export class ApiConfig {
-  /** 中转代理地址（与 server/README.md 部署端口一致） */
-  static readonly PROXY_BASE_URL: string = 'http://123.60.130.45:3000/v1/chat/completions';
+  /** 中转代理地址（HTTPS；与 server/src/server.js TLS 配置一致，端口 3000） */
+  static readonly PROXY_BASE_URL: string = 'https://rev-on.site:3000/v1/chat/completions';
   /** 代理共享令牌（与服务器 .env 的 PROXY_TOKEN 一致；服务器未启用则留空） */
   static readonly PROXY_TOKEN: string = '';
-  /** 认证服务（Auth Service）/ 华为账号：AGC 客户端 ID（授权与换 token 均用此号） */
-  static readonly HUAWEI_CLIENT_ID: string = '6917615335790825716';
-  /** 华为登录 OAuth 回调地址（须与 AGC 控制台登记的地址一致） */
-  static readonly HUAWEI_REDIRECT: string = 'http://123.60.130.45:3000/api/huawei/cb';
   /** 模型名称：deepseek-v4-flash（性价比高）；如需更强可换 deepseek-v4-pro */
   static readonly MODEL: string = 'deepseek-v4-flash';
   /** 连接超时（毫秒）：短连接超时便于快速失败重试 */

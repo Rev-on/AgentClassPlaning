@@ -231,7 +231,24 @@ export class I18n {
     ['seats.saved', '已保存 {n} 人到班级：{name}'],
     ['seats.skipH', '（{n} 人无身高，未导入）'],
     ['seats.listEmpty', '身高名单为空，请先填写'],
-    ['seats.doImport', '导入']
+    ['seats.doImport', '导入'],
+    ['def.subject', '物理'],
+    ['def.version', '苏科版'],
+    ['def.grade', '八年级'],
+    ['def.topic', '光的反射'],
+    ['def.period', '第1课时'],
+    ['def.usage', '新授课'],
+    ['def.requirement', '每层 3 题，含选择题与解答题'],
+    ['def.studentName', '李同学'],
+    ['def.className', '八年级2班'],
+    ['def.grades', '语文 88（班级均分 82）、数学 92（班级均分 78）、英语 85（班级均分 80）、物理 90（班级均分 76）'],
+    ['def.observation', '课堂积极发言，作业完成质量高；性格开朗，与同学相处融洽。最近一次周测物理满分，数学进步明显。'],
+    ['def.excel', '姓名\t语文\t数学\t英语\t物理\t班级均分\t考试\n李同学\t88\t92\t85\t90\t82\t期中\n王同学\t75\t68\t72\t70\t82\t期中\n张同学\t60\t55\t58\t52\t82\t期中'],
+    ['btn.edit', '编辑'],
+    ['btn.done', '完成'],
+    ['editor.title', '编辑生成内容'],
+    ['set.autoSaveHistory', '自动保存到历史'],
+    ['set.autoSaveHint', '开启后，AI 生成完成会自动存入历史记录（可随时在历史中查看、修改后另存）']
   ]);
 
   private static readonly en: Map<string, string> = new Map<string, string>([
@@ -452,7 +469,24 @@ export class I18n {
     ['seats.saved', 'Saved {n} to class: {name}'],
     ['seats.skipH', ' ({n} without height, skipped)'],
     ['seats.listEmpty', 'The height list is empty'],
-    ['seats.doImport', 'Import']
+    ['seats.doImport', 'Import'],
+    ['def.subject', 'Physics'],
+    ['def.version', 'Jiangsu Science Press Edition'],
+    ['def.grade', 'Grade 8'],
+    ['def.topic', 'Light Reflection'],
+    ['def.period', 'Period 1'],
+    ['def.usage', 'New Lesson'],
+    ['def.requirement', '3 items per tier, including multiple choice and problem-solving questions'],
+    ['def.studentName', 'Li Ming'],
+    ['def.className', 'Grade 8, Class 2'],
+    ['def.grades', 'Chinese 88 (class avg 82), Math 92 (class avg 78), English 85 (class avg 80), Physics 90 (class avg 76)'],
+    ['def.observation', 'Participates actively in class and turns in high-quality homework. Outgoing and gets along well with classmates. Scored full marks on the latest weekly Physics quiz, with clear progress in Math.'],
+    ['def.excel', 'Name\tChinese\tMath\tEnglish\tPhysics\tClass Avg\tExam\nStudent A\t88\t92\t85\t90\t82\tMidterm\nStudent B\t75\t68\t72\t70\t82\tMidterm\nStudent C\t60\t55\t58\t52\t82\tMidterm'],
+    ['btn.edit', 'Edit'],
+    ['btn.done', 'Done'],
+    ['editor.title', 'Edit Result'],
+    ['set.autoSaveHistory', 'Auto-save to History'],
+    ['set.autoSaveHint', 'When on, AI-generated results are saved to history automatically (view anytime, or edit and re-save)']
   ]);
 
   /** 读取当前语言：'zh' | 'en' | 'ug' | 'bo' | 'mn'（默认 zh） */

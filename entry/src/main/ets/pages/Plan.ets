@@ -15,11 +15,11 @@ import { ResultPanel } from '../common/components/ResultPanel';
 @Entry
 @Component
 struct Plan {
-  @State subject: string = '物理';
-  @State version: string = '苏科版';
-  @State grade: string = '八年级';
-  @State topic: string = '光的反射';
-  @State period: string = '第1课时';
+  @State subject: string = I18n.t('def.subject');
+  @State version: string = I18n.t('def.version');
+  @State grade: string = I18n.t('def.grade');
+  @State topic: string = I18n.t('def.topic');
+  @State period: string = I18n.t('def.period');
   @State remark: string = '';
   @State loading: boolean = false;
   @State result: string = '';
@@ -50,11 +50,27 @@ struct Plan {
         this.result = partial;
       });
       this.result = content;
+      this.autoSaveHistory();
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
+  }
+
+  /** 自动保存到历史（开关开启且内容非空时静默保存） */
+  private autoSaveHistory(): void {
+    if (this.result === '') {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const typeLabel: string = I18n.t('page.plan');
+    HistoryStore.autoAdd(ctx, {
+      type: typeLabel,
+      title: typeLabel + '-' + this.topic,
+      content: this.result,
+      time: HistoryStore.formatNow()
+    });
   }
 
   saveToHistory(): void {
@@ -163,7 +179,10 @@ struct Plan {
           result: this.result,
           type: I18n.t('page.plan'),
           title: I18n.t('page.plan') + '-' + this.topic,
-          onSave: () => this.saveToHistory()
+          onSave: () => this.saveToHistory(),
+          onEdited: (t: string): void => {
+            this.result = t;
+          }
         })
           .layoutWeight(1)
           .padding(16)
