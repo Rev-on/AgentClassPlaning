@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 import { AppSettings } from '../common/AppSettings';
 import { AppTheme } from '../common/AppTheme';
+import { GenTask } from '../common/GenTask';
 
 const DOMAIN = 0x0000;
 
@@ -48,6 +49,13 @@ export default class EntryAbility extends UIAbility {
     // 并行加载持久化的语言与主题；完成后通过 AppStorage 自动刷新 Splash/Index（不阻塞首屏）
     AppSettings.load(this.context).catch((err: Error) => {
       hilog.error(DOMAIN, 'testTag', 'Failed to load settings. Cause: %{public}s', err.message);
+    });
+
+    // Push Kit：请求通知权限 + 上报设备 Push Token（各自失败静默，不影响使用）
+    GenTask.requestNotifyPermission(this.context).catch(() => {
+    });
+    GenTask.registerPush(this.context).catch((e: Error) => {
+      hilog.warn(DOMAIN, 'testTag', 'Push register failed. Cause: %{public}s', e.message);
     });
   }
 

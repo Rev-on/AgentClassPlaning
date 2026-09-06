@@ -8,6 +8,10 @@
  *   GET  /health               健康检查
  *   POST /v1/chat/completions  与 App 现有调用完全兼容的透传接口
  *   POST /api/chat             简化接口：{ system?, user } -> 返回 OpenAI 格式结果
+ *   POST /api/task             提交后台生成任务（杀进程仍继续，完成后 Push 通知）
+ *   GET  /api/task/:id         查询任务状态与结果
+ *   GET  /api/tasks?deviceId=  按设备列出最近任务
+ *   POST /api/push/register    上报设备 Push Token
  *
  * 启动：cp .env.example .env 并填写密钥，然后 npm start
  */
@@ -17,6 +21,8 @@ const cors = require('cors');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const tasks = require('./tasks');
+const push = require('./push');
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -29,6 +35,7 @@ const TLS_ENABLED = process.env.TLS_ENABLED === undefined
 // TLS 开启时可保留的明文端口（平滑迁移用），默认 0 = 不额外监听
 const HTTP_PORT = Number(process.env.HTTP_PORT || 0);
 const UPSTREAM = process.env.UPSTREAM_URL || 'https://api.deepseek.com/chat/completions';
+const MODEL = process.env.MODEL || 'deepseek-v4-flash';
 const API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const PROXY_TOKEN = process.env.PROXY_TOKEN || '';
 const TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 150000);
@@ -174,6 +181,197 @@ app.post('/api/chat', checkToken, (req, res) => {
   messages.push({ role: 'user', content: user });
   req.body = Object.assign({}, data, { messages: messages });
   relay(req, res);
+});
+
+/* ===================== 后台生成任务 ===================== */
+
+/** 调用 DeepSeek 生成完整文本（非流式） */
+async function fetchDeepSeek(system, user) {
+  if (!API_KEY) {
+    throw new Error('服务端未配置 DEEPSEEK_API_KEY');
+  }
+  const messages = [];
+  if (system && system.trim() !== '') {
+    messages.push({ role: 'system', content: system });
+  }
+  messages.push({ role: 'user', content: user });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const resp = await fetch(UPSTREAM, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + API_KEY
+      },
+      body: JSON.stringify({ model: MODEL, messages: messages, stream: false }),
+      signal: ctrl.signal
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      throw new Error('上游返回 ' + resp.status + ': ' + text.slice(0, 200));
+    }
+    let data = {};
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('上游响应解析失败');
+    }
+    const content = data && data.choices && data.choices[0] &&
+      data.choices[0].message && data.choices[0].message.content;
+    if (typeof content !== 'string' || content.trim() === '') {
+      throw new Error('上游未返回内容');
+    }
+    return content;
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      throw new Error('上游请求超时');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 串行执行一个任务：生成 -> 保存 -> 推送完成/失败通知 */
+function runTask(taskId) {
+  const task = tasks.get(taskId);
+  if (!task) {
+    return;
+  }
+  return tasks.enqueue(async () => {
+    tasks.patch(taskId, { status: tasks.STATUS.RUNNING });
+    try {
+      const content = await fetchDeepSeek(task.system, task.user);
+      tasks.patch(taskId, {
+        status: tasks.STATUS.DONE,
+        content: content,
+        finishedAt: Date.now(),
+        error: ''
+      });
+      console.log('[tasks] done id=' + taskId + ' type=' + task.type + ' len=' + content.length);
+      // 若客户端创建过实况窗，先经 Push Kit 结束"生成中"实况窗（进程被杀也能结束）
+      if (task.liveView) {
+        await push.sendLiveViewEnd({
+          token: tasks.tokenOf(task.deviceId),
+          activityId: task.liveView.activityId,
+          event: task.liveView.event || 'PROGRESS'
+        }).catch((e) => console.error('[tasks] liveview end 失败: ' + String(e && e.message || e)));
+      }
+      // 完成通知：notifyId 与客户端"生成中"通知一致 -> 覆盖
+      await push.sendAlert({
+        token: tasks.tokenOf(task.deviceId),
+        notifyId: task.notifySeed,
+        title: task.notifyTitle,
+        body: task.notifyBody,
+        data: { taskId: taskId, type: task.type, status: 'done' }
+      }).catch((e) => console.error('[tasks] push done 失败: ' + String(e && e.message || e)));
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : '生成失败';
+      tasks.patch(taskId, {
+        status: tasks.STATUS.FAILED,
+        content: '',
+        finishedAt: Date.now(),
+        error: msg
+      });
+      console.error('[tasks] failed id=' + taskId + ' err=' + msg);
+      await push.sendAlert({
+        token: tasks.tokenOf(task.deviceId),
+        notifyId: task.notifySeed,
+        title: task.notifyFailTitle,
+        body: task.notifyFailBody,
+        data: { taskId: taskId, type: task.type, status: 'failed' }
+      }).catch((e) => console.error('[tasks] push fail 失败: ' + String(e && e.message || e)));
+    }
+  });
+}
+
+// 提交后台生成任务（立即返回 taskId；生成在服务端串行执行）
+app.post('/api/task', checkToken, (req, res) => {
+  const body = req.body || {};
+  const user = typeof body.user === 'string' ? body.user : '';
+  const deviceId = typeof body.deviceId === 'string' ? body.deviceId : '';
+  if (user.trim() === '') {
+    res.status(400).json({ error: { message: 'user 不能为空' } });
+    return;
+  }
+  if (deviceId === '') {
+    res.status(400).json({ error: { message: 'deviceId 不能为空' } });
+    return;
+  }
+  if (!API_KEY) {
+    res.status(500).json({ error: { message: '服务端未配置 DEEPSEEK_API_KEY' } });
+    return;
+  }
+  const task = tasks.create({
+    deviceId: deviceId,
+    type: typeof body.type === 'string' ? body.type : 'ai',
+    label: typeof body.label === 'string' ? body.label : '内容',
+    system: typeof body.system === 'string' ? body.system : '',
+    user: user,
+    notifySeed: body.notifySeed,
+    notifyTitle: typeof body.notifyTitle === 'string' ? body.notifyTitle : '',
+    notifyBody: typeof body.notifyBody === 'string' ? body.notifyBody : '',
+    notifyFailTitle: typeof body.notifyFailTitle === 'string' ? body.notifyFailTitle : '',
+    notifyFailBody: typeof body.notifyFailBody === 'string' ? body.notifyFailBody : ''
+  });
+  runTask(task.id);
+  res.status(202).json({ ok: true, taskId: task.id, status: task.status });
+});
+
+// 查询任务
+app.get('/api/task/:id', checkToken, (req, res) => {
+  const task = tasks.get(req.params.id);
+  if (!task) {
+    res.status(404).json({ error: { message: '任务不存在' } });
+    return;
+  }
+  res.json({ ok: true, task: task });
+});
+
+// 上报：客户端已为任务创建实况窗（完成时服务端据此结束实况窗）
+app.post('/api/task/:id/liveview', checkToken, (req, res) => {
+  const task = tasks.get(req.params.id);
+  if (!task) {
+    res.status(404).json({ error: { message: '任务不存在' } });
+    return;
+  }
+  const body = req.body || {};
+  const activityId = Number(body.activityId) || 0;
+  if (activityId <= 0) {
+    res.status(400).json({ error: { message: 'activityId 无效' } });
+    return;
+  }
+  tasks.patch(task.id, {
+    liveView: {
+      activityId: activityId,
+      event: typeof body.event === 'string' && body.event !== '' ? body.event : 'PROGRESS'
+    }
+  });
+  res.json({ ok: true });
+});
+
+// 按设备列出最近任务
+app.get('/api/tasks', checkToken, (req, res) => {
+  const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : '';
+  if (deviceId === '') {
+    res.status(400).json({ error: { message: 'deviceId 不能为空' } });
+    return;
+  }
+  res.json({ ok: true, tasks: tasks.listByDevice(deviceId, Number(req.query.limit) || 20) });
+});
+
+// 上报设备 Push Token
+app.post('/api/push/register', checkToken, (req, res) => {
+  const body = req.body || {};
+  const deviceId = typeof body.deviceId === 'string' ? body.deviceId : '';
+  const token = typeof body.token === 'string' ? body.token : '';
+  if (deviceId === '' || token === '') {
+    res.status(400).json({ error: { message: 'deviceId 与 token 不能为空' } });
+    return;
+  }
+  tasks.registerDevice(deviceId, token);
+  res.json({ ok: true });
 });
 
 // 统一异常兜底

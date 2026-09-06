@@ -4,6 +4,7 @@
  * 支持标题、段落、列表、代码块（灰底等宽）、表格
  */
 import { picker, fileIo as fs } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import promptAction from '@ohos.promptAction';
 import JSZip from '@ohos/jszip';
@@ -40,6 +41,47 @@ export class DocxExporter {
     const saveOptions = new picker.DocumentSaveOptions();
     saveOptions.newFileNames = [fileName];
     saveOptions.fileSuffixChoices = ['.docx'];
+    const saveResult = await savePicker.save(saveOptions);
+    if (saveResult.length === 0) {
+      return;
+    }
+    const uri: string = saveResult[0];
+    const file = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+    fs.writeSync(file.fd, buffer);
+    fs.closeSync(file);
+    promptAction.showToast({ message: '已导出：' + fileName });
+  }
+
+  /** 导出文本为 .json 文件：剥离 ```json 围栏与前后杂文，仅保留 JSON；合法则格式化缩进 */
+  static async exportJson(context: common.UIAbilityContext, content: string, fileName: string): Promise<void> {
+    let text: string = content.trim();
+    // 去掉 ```json ... ``` 代码块围栏
+    const fenceStart: number = text.indexOf('```');
+    if (fenceStart >= 0) {
+      const fenceEnd: number = text.lastIndexOf('```');
+      if (fenceEnd > fenceStart) {
+        text = text.substring(fenceStart + 3, fenceEnd).trim();
+      }
+    }
+    // 只保留第一个 [ 到最后一个 ] 的 JSON 主体
+    const s: number = text.indexOf('[');
+    const e: number = text.lastIndexOf(']');
+    if (s >= 0 && e > s) {
+      text = text.substring(s, e + 1);
+    }
+    // 合法 JSON 则格式化（2 空格缩进），否则原样保存
+    let pretty: string = text;
+    try {
+      pretty = JSON.stringify(JSON.parse(text), null, 2);
+    } catch (err) {
+      pretty = text;
+    }
+    const u8: Uint8Array = new util.TextEncoder().encodeInto(pretty);
+    const buffer: ArrayBuffer = u8.buffer as ArrayBuffer;
+    const savePicker = new picker.DocumentViewPicker(context);
+    const saveOptions = new picker.DocumentSaveOptions();
+    saveOptions.newFileNames = [fileName];
+    // ArkUI-X 跨端：不设置 fileSuffixChoices（Android 侧不支持）
     const saveResult = await savePicker.save(saveOptions);
     if (saveResult.length === 0) {
       return;

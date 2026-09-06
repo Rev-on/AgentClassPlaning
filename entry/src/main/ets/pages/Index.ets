@@ -8,6 +8,7 @@ import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { AcceptStore } from '../common/AcceptStore';
+import { GenTask } from '../common/GenTask';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
 
 /** 免责声明弹窗：首次启动显示，倒计时 5 秒后方可同意；同意后永久不再显示 */
@@ -191,6 +192,9 @@ struct Index {
         this.dialogController.open();
       }
     }).catch(() => {
+    });
+    // 恢复未完成的后台生成任务（进程被杀/离开页面后的完成结果在此接收并保存）
+    GenTask.recover(ctx).catch(() => {
     });
   }
 

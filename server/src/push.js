@@ -1,0 +1,173 @@
+/**
+ * 华为 Push Kit 服务端推送（HarmonyOS v3 REST API）
+ *
+ * 依赖环境变量（在 .env 中配置，未配置时所有发送自动跳过，不影响任务本身）：
+ *   AGC_PROJECT_ID        AppGallery Connect 项目ID（项目设置页获取）
+ *   AGC_JWT_KID           服务账号密钥文件 key_id
+ *   AGC_JWT_ISS           服务账号 sub_account（iss）
+ *   AGC_JWT_PRIVATE_KEY   服务账号私钥 PEM（含换行用 \n，或使用 AGC_PUSH_ACCOUNT_FILE）
+ *   AGC_PUSH_ACCOUNT_FILE 或直接指向 AGC 下载的服务账号 JSON（含 key_id/sub_account/private_key）
+ *   AGC_PUSH_TEST         true 表示调测消息（每日全网 1000 条限额）
+ *
+ * 参考：https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/push-send-alert
+ */
+const crypto = require('crypto');
+const fs = require('fs');
+
+const PUSH_URL = 'https://push-api.cloud.huawei.com/v3/';
+const AUD = 'https://oauth-login.cloud.huawei.com/oauth2/v3/token';
+
+function readAccount() {
+  const file = process.env.AGC_PUSH_ACCOUNT_FILE;
+  if (file) {
+    try {
+      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return {
+        projectId: process.env.AGC_PROJECT_ID || j.project_id || '',
+        kid: j.key_id || '',
+        iss: j.sub_account || j.client_email || '',
+        privateKey: j.private_key || ''
+      };
+    } catch (e) {
+      console.error('[push] 读取 AGC_PUSH_ACCOUNT_FILE 失败: ' + (e && e.message ? e.message : String(e)));
+    }
+  }
+  return {
+    projectId: process.env.AGC_PROJECT_ID || '',
+    kid: process.env.AGC_JWT_KID || '',
+    iss: process.env.AGC_JWT_ISS || '',
+    privateKey: process.env.AGC_JWT_PRIVATE_KEY || ''
+  };
+}
+
+function configured() {
+  const a = readAccount();
+  return !!(a.projectId && a.kid && a.iss && a.privateKey);
+}
+
+function b64url(buf) {
+  return Buffer.from(buf).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** 生成 PS256 JWT（Authorization Bearer），有效期 1 小时 */
+function buildJwt() {
+  const a = readAccount();
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64url(JSON.stringify({ kid: a.kid, alg: 'PS256', typ: 'JWT' }));
+  const payload = b64url(JSON.stringify({ aud: AUD, iss: a.iss, iat: now, exp: now + 3600 }));
+  const input = header + '.' + payload;
+  const key = crypto.createPrivateKey(String(a.privateKey).replace(/\\n/g, '\n'));
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(input);
+  signer.end();
+  const sig = signer.sign({ key: key, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 });
+  return input + '.' + b64url(sig);
+}
+
+/**
+ * 发送通知消息（push-type 0，Alert）。
+ * notifyId 与客户端本地"生成中"通知保持一致，实现"完成通知覆盖进行中通知"。
+ */
+async function sendAlert({ token, notifyId, title, body, data }) {
+  if (!configured()) {
+    console.warn('[push] 未配置 AGC 推送凭据，跳过推送（title=' + title + '）');
+    return { skipped: true };
+  }
+  if (!token) {
+    console.warn('[push] 设备 Push Token 为空，跳过推送');
+    return { skipped: true };
+  }
+  const a = readAccount();
+  const url = PUSH_URL + a.projectId + '/messages:send';
+  const payload = {
+    payload: {
+      notification: {
+        category: process.env.AGC_PUSH_CATEGORY || 'MARKETING',
+        title: String(title || ''),
+        body: String(body || ''),
+        clickAction: { actionType: 0, data: data || {} },
+        foregroundShow: false, // 前台不展示，避免与页面内展示重复；后台/杀进程时展示
+        notifyId: Number(notifyId || 0)
+      }
+    },
+    target: { token: [token] },
+    pushOptions: {
+      testMessage: process.env.AGC_PUSH_TEST === 'true',
+      ttl: 86400
+    }
+  };
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + buildJwt(),
+        'push-type': '0'
+      },
+      body: JSON.stringify(payload)
+    });
+    const text = await resp.text();
+    if (resp.ok) {
+      console.log('[push] 完成通知已发送 code=' + resp.status + ' body=' + text.slice(0, 200));
+      return { ok: true };
+    }
+    console.error('[push] 发送失败 code=' + resp.status + ' body=' + text.slice(0, 300));
+    return { ok: false, status: resp.status, body: text.slice(0, 300) };
+  } catch (e) {
+    console.error('[push] 发送异常: ' + (e && e.message ? e.message : String(e)));
+    return { ok: false };
+  }
+}
+
+/**
+ * 通过 Push Kit 结束本地创建的实况窗（push-type 7，operation 2）。
+ * 用于任务完成时清理"生成中"实况窗（即使客户端进程已被杀掉也能结束）。
+ */
+async function sendLiveViewEnd({ token, activityId, event }) {
+  if (!configured()) {
+    console.warn('[push] 未配置 AGC 推送凭据，跳过实况窗结束消息');
+    return { skipped: true };
+  }
+  if (!token) {
+    console.warn('[push] 设备 Push Token 为空，跳过实况窗结束消息');
+    return { skipped: true };
+  }
+  const a = readAccount();
+  const url = PUSH_URL + a.projectId + '/messages:send';
+  const payload = {
+    payload: {
+      activityId: Number(activityId || 0),
+      operation: 2,
+      event: String(event || 'PROGRESS')
+    },
+    target: { token: [token] },
+    pushOptions: {
+      testMessage: process.env.AGC_PUSH_TEST === 'true',
+      ttl: 86400
+    }
+  };
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + buildJwt(),
+        'push-type': '7'
+      },
+      body: JSON.stringify(payload)
+    });
+    const text = await resp.text();
+    if (resp.ok) {
+      console.log('[push] 实况窗结束消息已发送 activityId=' + activityId);
+      return { ok: true };
+    }
+    console.error('[push] 实况窗结束消息失败 code=' + resp.status + ' body=' + text.slice(0, 300));
+    return { ok: false, status: resp.status };
+  } catch (e) {
+    console.error('[push] 实况窗结束消息异常: ' + (e && e.message ? e.message : String(e)));
+    return { ok: false };
+  }
+}
+
+module.exports = { sendAlert, sendLiveViewEnd, configured };

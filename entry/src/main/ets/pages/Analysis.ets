@@ -76,9 +76,13 @@ struct Analysis {
     try {
       const content: string = await AiService.chat(Prompts.analysisSystem(), user, (partial: string) => {
         this.result = partial;
+      }, false, {
+        ctx: getContext(this) as common.UIAbilityContext,
+        type: 'analysis',
+        label: I18n.t('page.analysis')
       });
       this.result = content;
-      this.autoSaveHistory();
+      this.autoSaveHistory(content);
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
@@ -86,9 +90,10 @@ struct Analysis {
     }
   }
 
-  /** 自动保存到历史（开关开启且内容非空时静默保存） */
-  private autoSaveHistory(): void {
-    if (this.result === '') {
+  /** 自动保存到历史（开关开启且内容非空时静默保存；content 用于页面已离开时的兜底） */
+  private autoSaveHistory(content?: string): void {
+    const text: string = content !== undefined && content !== '' ? content : this.result;
+    if (text === '') {
       return;
     }
     const ctx = getContext(this) as common.UIAbilityContext;
@@ -96,7 +101,7 @@ struct Analysis {
     HistoryStore.autoAdd(ctx, {
       type: typeLabel,
       title: typeLabel + '-' + HistoryStore.formatNow().slice(5, 10),
-      content: this.result,
+      content: text,
       time: HistoryStore.formatNow()
     });
   }

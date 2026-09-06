@@ -20,4 +20,5 @@ node_modules/
 
 # 构建产物
 /RevTechingMaster-Android.apk
+*.apk
 *.hap

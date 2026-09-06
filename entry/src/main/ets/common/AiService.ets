@@ -5,12 +5,26 @@
  * @param onDelta 保留参数以兼容调用方，当前固定非流式不使用
  */
 import http from '@ohos.net.http';
+import common from '@ohos.app.ability.common';
 import { ApiConfig } from './ApiConfig';
+import { GenTask } from './GenTask';
+import { HistoryStore } from './HistoryStore';
 
 /** 对话消息 */
 interface ChatMessage {
   role: string;
   content: string;
+}
+
+/** 任务模式参数（启用后生成走服务端后台任务，支持进程被杀后仍完成） */
+export interface AiTaskOpts {
+  ctx: common.UIAbilityContext;
+  /** 功能类型标识（plan/quiz/...），服务端记录用 */
+  type: string;
+  /** 本地化类型名（用于通知文案，如"教案"） */
+  label: string;
+  /** 页面是否已销毁/离开（true 后不再回调 UI，结果转为静默保存+通知） */
+  gone?: () => boolean;
 }
 
 /** 思考模式配置：type=disabled 关闭思维链（快速模式） */
@@ -53,11 +67,20 @@ export class AiService {
    * 调用 DeepSeek，返回完整回复文本（非流式）
    * @param systemPrompt 系统提示词（角色与输出规范）
    * @param userPrompt 用户输入内容
-   * @param onDelta 保留参数（兼容历史调用），当前实现不使用
+   * @param onDelta 结果文本回调（任务模式在完成后回调一次；兼容历史流式调用）
    * @param skipNote 为 true 时不追加"AI生成"尾注（如课件大纲 JSON 结构化输出）
+   * @param opts 任务模式参数；传入 ctx 后自动使用"服务端后台任务"模式
+   *             （提交即返回、可离开页面/杀进程，完成后通知并可在历史中查看）
    */
   static async chat(systemPrompt: string, userPrompt: string, onDelta?: (partial: string) => void,
-    skipNote: boolean = false): Promise<string> {
+    skipNote: boolean = false, opts?: AiTaskOpts): Promise<string> {
+    if (opts !== undefined && opts.ctx !== undefined) {
+      try {
+        return await AiService.chatByTask(systemPrompt, userPrompt, skipNote, onDelta, opts);
+      } catch (e) {
+        // 任务链路不可用（网络/服务器旧版）时回退到传统同步请求，保证可用
+      }
+    }
     let lastErr: Error = new Error('AI 请求失败，请稍后重试');
     for (let attempt: number = 0; attempt < AiService.MAX_ATTEMPTS; attempt++) {
       try {
@@ -68,6 +91,85 @@ export class AiService {
       }
     }
     throw lastErr;
+  }
+
+  /**
+   * 后台任务模式：提交到服务端任务队列 -> 发布"生成中"通知 -> 轮询结果。
+   * 页面销毁后（gone()=true）不再回调 UI，改为静默保存历史并更新通知；进程被杀则完全依赖服务端完成与推送。
+   */
+  private static async chatByTask(systemPrompt: string, userPrompt: string, skipNote: boolean,
+    onDelta: ((partial: string) => void) | undefined, opts: AiTaskOpts): Promise<string> {
+    const seed: number = GenTask.nextSeed();
+    const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt, seed);
+    // 生成中反馈：实况窗（PROGRESS 进度）优先，不可用回退普通通知
+    const lvOk: boolean = await GenTask.publishRunning(opts.ctx, seed, opts.label);
+    if (lvOk) {
+      await GenTask.reportLive(taskId, seed); // 通知服务端：完成后推送结束消息清理实况窗
+    }
+    let goneFlag: boolean = opts.gone !== undefined ? opts.gone() : false;
+    const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms));
+    for (let i: number = 0; i < GenTask.POLL_MAX; i++) {
+      await sleep(GenTask.POLL_MS);
+      goneFlag = opts.gone !== undefined ? opts.gone() : false;
+      // 页面在期间缓慢推进实况窗进度（每约 10 秒一次）
+      if (lvOk && !goneFlag && i % 5 === 0 && i < 200) {
+        const seq: number = 2 + Math.floor(i / 5);
+        const prog: number = 12 + i * 3;
+        await GenTask.updateProgress(seed, opts.label, seq, prog);
+      }
+      let content: string = '';
+      let status: string = '';
+      try {
+        const t = await GenTask.fetchTask(taskId);
+        if (t === null) {
+          continue;
+        }
+        status = t.status;
+        content = t.content !== undefined ? t.content : '';
+      } catch (e) {
+        continue; // 网络抖动：跳过本轮继续轮询
+      }
+      if (status === 'done') {
+        await GenTask.publishResult(seed, opts.label, true);
+        await GenTask.clearPending(opts.ctx);
+        if (lvOk) {
+          await GenTask.stopLiveLocal(seed, opts.label);
+        }
+        if (goneFlag) {
+          // 页面已离开：结果静默入库，避免丢失
+          if (content !== '') {
+            await HistoryStore.autoAdd(opts.ctx, {
+              type: opts.label,
+              title: opts.label,
+              content: content,
+              time: HistoryStore.formatNow()
+            });
+          }
+        } else if (onDelta !== undefined) {
+          onDelta(content);
+        }
+        return AiService.withAiNote(content, skipNote);
+      }
+      if (status === 'failed') {
+        await GenTask.publishResult(seed, opts.label, false);
+        await GenTask.clearPending(opts.ctx);
+        if (lvOk) {
+          await GenTask.stopLiveLocal(seed, opts.label);
+        }
+        let msg: string = 'AI 生成失败，请稍后重试';
+        try {
+          const t2 = await GenTask.fetchTask(taskId);
+          if (t2 !== null && t2.error !== undefined && t2.error !== '') {
+            msg = t2.error;
+          }
+        } catch (e) {
+          // ignore
+        }
+        throw new Error(msg);
+      }
+    }
+    // 轮询超时：保留任务与"生成中"通知，下次进入 App 时由 recover 接管
+    throw new Error('AI 生成较慢，请稍后在通知或历史中查看结果');
   }
 
   /** 在生成内容末尾追加"AI 生成"标注（软件层统一生效，课件 JSON 除外） */

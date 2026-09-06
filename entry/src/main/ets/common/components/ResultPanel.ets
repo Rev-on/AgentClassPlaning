@@ -25,6 +25,8 @@ export struct ResultPanel {
   /** 整屏编辑后的文本回写（父页面据此更新 result） */
   onEdited: ((t: string) => void) = (t: string): void => {
   };
+  /** 导出模式：'word' 导出 Word（默认）；'json' 导出 JSON */
+  exportMode: string = 'word';
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
 
@@ -67,6 +69,32 @@ export struct ResultPanel {
     DocxExporter.exportDocx(ctx, content, safeTitle + '.docx').catch((err: Error) => {
       promptAction.showToast({ message: I18n.t('err.exportFail') + err.message });
     });
+  }
+
+  /** 导出指定文本为 JSON 文件 */
+  private exportJsonFile(content: string): void {
+    if (content === '') {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const safeTitle: string = this.title === '' ? 'Result' : this.title;
+    DocxExporter.exportJson(ctx, content, safeTitle + '.json').catch((err: Error) => {
+      promptAction.showToast({ message: I18n.t('err.exportFail') + err.message });
+    });
+  }
+
+  /** 当前是否为 JSON 导出模式 */
+  private isJsonMode(): boolean {
+    return this.exportMode === 'json';
+  }
+
+  /** 按模式执行导出 */
+  private doExport(content: string): void {
+    if (this.isJsonMode()) {
+      this.exportJsonFile(content);
+    } else {
+      this.exportWord(content);
+    }
   }
 
   /** 进入编辑态 */
@@ -137,13 +165,13 @@ export struct ResultPanel {
           .layoutWeight(1)
           .backgroundColor('#4A90D9')
           .onClick(() => this.copyText(this.editText))
-        Button(this.t('btn.exportWord'))
+        Button(this.isJsonMode() ? this.t('btn.exportJson') : this.t('btn.exportWord'))
           .fontFamily(AppFonts.family())
           .fontSize(14)
           .height(40)
           .layoutWeight(1)
           .backgroundColor('#2F6DB5')
-          .onClick(() => this.exportWord(this.editText))
+          .onClick(() => this.doExport(this.editText))
         Button(this.t('btn.saveHist'))
           .fontFamily(AppFonts.family())
           .fontSize(14)
@@ -179,13 +207,13 @@ export struct ResultPanel {
           .height(30)
           .backgroundColor('#4A90D9')
           .onClick(() => this.copyText(this.result))
-        Button(this.t('btn.exportWord'))
+        Button(this.isJsonMode() ? this.t('btn.exportJson') : this.t('btn.exportWord'))
           .fontFamily(AppFonts.family())
           .fontSize(13)
           .height(30)
           .backgroundColor('#2F6DB5')
           .margin({ left: 8 })
-          .onClick(() => this.exportWord(this.result))
+          .onClick(() => this.doExport(this.result))
         Button(this.t('btn.saveHist'))
           .fontFamily(AppFonts.family())
           .fontSize(13)

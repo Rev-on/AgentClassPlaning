@@ -11,6 +11,8 @@
 export class ApiConfig {
   /** 中转代理地址（HTTPS；与 server/src/server.js TLS 配置一致，端口 3000） */
   static readonly PROXY_BASE_URL: string = 'https://rev-on.site:3000/v1/chat/completions';
+  /** 服务端 API 根地址（后台生成任务 / Push 注册） */
+  static readonly SERVER_BASE_URL: string = 'https://rev-on.site:3000/api';
   /** 代理共享令牌（与服务器 .env 的 PROXY_TOKEN 一致；服务器未启用则留空） */
   static readonly PROXY_TOKEN: string = '';
   /** 模型名称：deepseek-v4-flash（性价比高）；如需更强可换 deepseek-v4-pro */

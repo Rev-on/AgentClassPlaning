@@ -35,6 +35,34 @@ struct Courseware {
     return AppTheme.color(key, this.resolvedTheme);
   }
 
+  /** 从原始输出中提取合法 JSON 并格式化为缩进文本；失败返回 null */
+  private normalizeJson(raw: string): string | null {
+    let text: string = raw.trim();
+    const fenceStart: number = text.indexOf('```');
+    if (fenceStart >= 0) {
+      const fenceEnd: number = text.lastIndexOf('```');
+      if (fenceEnd > fenceStart) {
+        text = text.substring(fenceStart + 3, fenceEnd).trim();
+      }
+    }
+    const s: number = text.indexOf('[');
+    const e: number = text.lastIndexOf(']');
+    if (s < 0 || e <= s) {
+      return null;
+    }
+    text = text.substring(s, e + 1);
+    let obj: object | null = null;
+    try {
+      obj = JSON.parse(text) as object;
+    } catch (err) {
+      return null;
+    }
+    if (obj === null || !Array.isArray(obj)) {
+      return null;
+    }
+    return JSON.stringify(obj, null, 2);
+  }
+
   async generate(): Promise<void> {
     if (this.topic.trim() === '') {
       promptAction.showToast({ message: this.t('err.noTopic') });
@@ -47,9 +75,20 @@ struct Courseware {
     try {
       const content: string = await AiService.chat(Prompts.coursewareSystem(), user, (partial: string) => {
         this.result = partial;
-      }, true);
-      this.result = content;
-      this.autoSaveHistory();
+      }, true, {
+        ctx: getContext(this) as common.UIAbilityContext,
+        type: 'courseware',
+        label: I18n.t('page.courseware')
+      });
+      const pretty: string | null = this.normalizeJson(content);
+      const finalText: string = pretty !== null ? pretty : content;
+      if (pretty !== null) {
+        this.result = pretty;
+      } else {
+        this.result = content;
+        promptAction.showToast({ message: this.t('err.jsonInvalid') });
+      }
+      this.autoSaveHistory(finalText);
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
@@ -57,9 +96,10 @@ struct Courseware {
     }
   }
 
-  /** 自动保存到历史（开关开启且内容非空时静默保存） */
-  private autoSaveHistory(): void {
-    if (this.result === '') {
+  /** 自动保存到历史（开关开启且内容非空时静默保存；content 用于页面已离开时的兜底） */
+  private autoSaveHistory(content?: string): void {
+    const text: string = content !== undefined && content !== '' ? content : this.result;
+    if (text === '') {
       return;
     }
     const ctx = getContext(this) as common.UIAbilityContext;
@@ -67,7 +107,7 @@ struct Courseware {
     HistoryStore.autoAdd(ctx, {
       type: typeLabel,
       title: typeLabel + '-' + this.topic,
-      content: this.result,
+      content: text,
       time: HistoryStore.formatNow()
     });
   }
@@ -151,6 +191,12 @@ struct Courseware {
           .onClick(() => {
             this.generate();
           })
+        Text(this.t('hint.coursewareJson'))
+          .fontFamily(AppFonts.family())
+          .fontSize(11)
+          .fontColor(this.col('hint'))
+          .width('100%')
+          .lineHeight(16)
       }
       .width('100%')
       .padding(16)
@@ -168,6 +214,7 @@ struct Courseware {
           result: this.result,
           type: I18n.t('page.courseware'),
           title: I18n.t('page.courseware') + '-' + this.topic,
+          exportMode: 'json',
           onSave: () => this.saveToHistory(),
           onEdited: (t: string): void => {
             this.result = t;
