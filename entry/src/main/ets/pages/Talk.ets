@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 沟通话术建议：老师描述家校沟通困难，AI 生成得体话术与避坑提示（双语界面 + 深浅主题）
  * 说明：下拉选项按界面语言显示中/英；发送给 AI 的字段值保留中文，便于生成内容
  */
@@ -13,9 +13,8 @@ import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
-@Entry
 @Component
-struct Talk {
+export struct TalkContent {
   private sceneZh: string[] = ['学习退步沟通', '课堂表现反馈', '作业问题沟通', '考试后安抚', '家长会发言'];
   private toneZh: string[] = ['温和沟通', '正式规范', '激励引导'];
 
@@ -27,6 +26,8 @@ struct Talk {
   @State result: string = '';
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  /** 2in1 独立页面（IndexWideDuo 下半屏）渲染时由壳传入 true：本组件不内嵌结果区 */
+  bottomResult: boolean = false;
 
   private t(key: string): string {
     void this.appLang;
@@ -201,7 +202,9 @@ struct Talk {
       .backgroundColor(this.col('card'))
       .borderRadius(14)
 
-      if (this.loading) {
+      if (this.bottomResult) {
+        // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
+      } else if (this.loading) {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#D9534F')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
@@ -237,5 +240,25 @@ struct Talk {
     .height('100%')
     .padding(12)
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct TalkEntry {
+  build() {
+    Column() {
+      TalkContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

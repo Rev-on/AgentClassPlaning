@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 班级管理：班级列表（新建/重命名/删除/进入详情）
  */
 import router from '@ohos.router';
@@ -9,16 +9,20 @@ import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
+import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
+import { ClassDetailContent } from './ClassDetail';
 
-@Entry
 @Component
-struct ClassManager {
+export struct ClassManagerContent {
   @State classes: ClassItem[] = [];
   @State inputName: string = '';
   /** 正在重命名的班级 id（-1 表示新建模式） */
   @State editId: number = -1;
+  /** 两栏（平板横屏）模式下当前打开的班级详情 id（-1=仍在班级列表） */
+  @State openCid: number = -1;
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  @StorageProp('appWideLayout') wideLayout: boolean = false;
 
   private t(key: string): string {
     void this.appLang;
@@ -105,11 +109,39 @@ struct ClassManager {
   }
 
   private openDetail(item: ClassItem): void {
+    if (this.wideLayout) {
+      // 两栏模式：右栏内嵌班级详情，不整屏跳转
+      this.openCid = item.id;
+      return;
+    }
     router.pushUrl({ url: 'pages/ClassDetail', params: { cid: item.id.toString() } });
   }
 
   build() {
     Column({ space: 0 }) {
+      if (this.wideLayout && this.openCid >= 0) {
+        // 两栏（平板横屏）内嵌班级详情：提供“返回列表”按钮
+        Row({ space: 10 }) {
+          Button('←')
+            .fontFamily(AppFonts.family())
+            .fontSize(18)
+            .fontColor(this.col('title'))
+            .backgroundColor(this.col('card'))
+            .width(40)
+            .height(40)
+            .borderRadius(20)
+            .onClick(() => { this.openCid = -1; })
+          VerticalMongolianText({
+            content: this.t('cls.detail'),
+            textSize: 20,
+            textColor: this.col('title'),
+            isBold: true
+          })
+        }
+        .width('100%')
+        .padding({ left: 4, right: 4, top: 6, bottom: 6 })
+        ClassDetailContent({ cid: this.openCid })
+      } else {
       PageHeader({ title: this.t('page.classes') })
 
       Column({ space: 12 }) {
@@ -200,9 +232,30 @@ struct ClassManager {
       .width('100%')
       .layoutWeight(1)
       .padding(16)
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct ClassManagerEntry {
+  build() {
+    Column() {
+      ClassManagerContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

@@ -1,6 +1,7 @@
 import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyboardAvoidMode, window } from '@kit.ArkUI';
+import deviceInfo from '@ohos.deviceInfo';
 import { AppSettings } from '../common/AppSettings';
 import { AppTheme } from '../common/AppTheme';
 import { GenTask } from '../common/GenTask';
@@ -23,6 +24,8 @@ export default class EntryAbility extends UIAbility {
       const isDark: boolean = newConfig.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
       AppStorage.setOrCreate(AppTheme.RESOLVED_KEY, isDark ? 'dark' : 'light');
     }
+    // 未手动选择语言时，系统语言变化自动跟随
+    AppSettings.applySystemLangIfAuto();
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onConfigurationUpdate');
   }
 
@@ -43,6 +46,17 @@ export default class EntryAbility extends UIAbility {
         windowStage.getMainWindowSync().getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
       } catch (e) {
         hilog.warn(DOMAIN, 'testTag', 'setKeyboardAvoidMode failed. Cause: %{public}s', JSON.stringify(e));
+      }
+      // 华为 2in1 / 折叠 PC（MateBook Fold 等）：应用启动后自动全屏（沉浸式铺满），保证下半屏结果大面板有足够高度
+      try {
+        const t: string = deviceInfo.deviceType;
+        if (t === '2in1' || t === 'pc') {
+          windowStage.getMainWindowSync().setWindowLayoutFullScreen(true).catch((e: Error) => {
+            hilog.warn(DOMAIN, 'testTag', 'setWindowLayoutFullScreen failed. Cause: %{public}s', JSON.stringify(e));
+          });
+        }
+      } catch (e) {
+        hilog.warn(DOMAIN, 'testTag', 'fullscreen setup failed. Cause: %{public}s', JSON.stringify(e));
       }
     });
 

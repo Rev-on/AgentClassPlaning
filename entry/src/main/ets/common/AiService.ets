@@ -101,21 +101,27 @@ export class AiService {
     onDelta: ((partial: string) => void) | undefined, opts: AiTaskOpts): Promise<string> {
     const seed: number = GenTask.nextSeed();
     const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt, seed);
-    // 生成中反馈：实况窗（PROGRESS 进度）优先，不可用回退普通通知
+    // 生成中反馈：实况窗（PROGRESS 进度）优先，不可用回退常驻"生成中"通知
     const lvOk: boolean = await GenTask.publishRunning(opts.ctx, seed, opts.label);
     if (lvOk) {
       await GenTask.reportLive(taskId, seed); // 通知服务端：完成后推送结束消息清理实况窗
     }
+    await GenTask.markRunningMode(opts.ctx, lvOk); // 记录反馈模式：实况窗免重建；普通通知需常驻/可心跳恢复
     let goneFlag: boolean = opts.gone !== undefined ? opts.gone() : false;
     const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms));
     for (let i: number = 0; i < GenTask.POLL_MAX; i++) {
       await sleep(GenTask.POLL_MS);
       goneFlag = opts.gone !== undefined ? opts.gone() : false;
-      // 页面在期间缓慢推进实况窗进度（每约 10 秒一次）
-      if (lvOk && !goneFlag && i % 5 === 0 && i < 200) {
-        const seq: number = 2 + Math.floor(i / 5);
-        const prog: number = 12 + i * 3;
-        await GenTask.updateProgress(seed, opts.label, seq, prog);
+      // 每约 10 秒一次：实况窗模式在页面存活时推进进度；
+      // 普通通知模式心跳重建（被清除立即恢复），常驻效果覆盖离开页面后进程仍存活的轮询阶段
+      if (i % 5 === 0 && i < 200) {
+        if (lvOk && !goneFlag) {
+          const seq: number = 2 + Math.floor(i / 5);
+          const prog: number = 12 + i * 3;
+          await GenTask.updateProgress(seed, opts.label, seq, prog);
+        } else if (!lvOk) {
+          await GenTask.refreshRunning(seed, opts.label);
+        }
       }
       let content: string = '';
       let status: string = '';

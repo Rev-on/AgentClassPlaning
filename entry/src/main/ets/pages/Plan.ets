@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 教案生成：输入课题信息，AI 生成结构化完整教案（双语界面 + 深浅主题）
  */
 import common from '@ohos.app.ability.common';
@@ -12,9 +12,8 @@ import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
-@Entry
 @Component
-struct Plan {
+export struct PlanContent {
   @State subject: string = I18n.t('def.subject');
   @State version: string = I18n.t('def.version');
   @State grade: string = I18n.t('def.grade');
@@ -25,6 +24,8 @@ struct Plan {
   @State result: string = '';
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  /** 2in1 独立页面（IndexWideDuo 下半屏）渲染时由壳传入 true：本组件不内嵌结果区 */
+  bottomResult: boolean = false;
 
   private t(key: string): string {
     void this.appLang;
@@ -173,7 +174,9 @@ struct Plan {
       .backgroundColor(this.col('card'))
       .borderRadius(14)
 
-      if (this.loading) {
+      if (this.bottomResult) {
+        // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
+      } else if (this.loading) {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#4A90D9')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
@@ -209,5 +212,25 @@ struct Plan {
     .height('100%')
     .padding(12)
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct PlanEntry {
+  build() {
+    Column() {
+      PlanContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

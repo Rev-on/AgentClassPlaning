@@ -3,11 +3,47 @@
   "version": "1.0.0",
   "description": "Rev TechingMaster 电脑版（Electron）：初中教学备课智能助手",
   "main": "main.js",
-  "scripts": {
-    "start": "electron ."
-  },
+  "author": "Rev TechingMaster",
   "license": "AGPL-3.0",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "png-to-ico": "^2.1.8"
+  },
+  "build": {
+    "appId": "com.rev.techingmaster",
+    "productName": "Rev TechingMaster",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Rev TechingMaster",
+      "artifactName": "RevTechingMaster-Setup-${version}.${ext}"
+    }
   }
 }

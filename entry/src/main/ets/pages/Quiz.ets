@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 分层练习命题：AI 命制基础/提高/拓展三层练习（双语界面 + 深浅主题）
  */
 import common from '@ohos.app.ability.common';
@@ -12,9 +12,8 @@ import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
-@Entry
 @Component
-struct Quiz {
+export struct QuizContent {
   @State subject: string = I18n.t('def.subject');
   @State grade: string = I18n.t('def.grade');
   @State topic: string = I18n.t('def.topic');
@@ -24,6 +23,8 @@ struct Quiz {
   @State result: string = '';
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  /** 2in1 独立页面（IndexWideDuo 下半屏）渲染时由壳传入 true：本组件不内嵌结果区 */
+  bottomResult: boolean = false;
 
   private t(key: string): string {
     void this.appLang;
@@ -162,7 +163,9 @@ struct Quiz {
       .backgroundColor(this.col('card'))
       .borderRadius(14)
 
-      if (this.loading) {
+      if (this.bottomResult) {
+        // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
+      } else if (this.loading) {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#3E9B6F')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
@@ -198,5 +201,25 @@ struct Quiz {
     .height('100%')
     .padding(12)
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct QuizEntry {
+  build() {
+    Column() {
+      QuizContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

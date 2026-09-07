@@ -4,31 +4,28 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Rev TechingMaster</title>
-<link rel="stylesheet" href="app.css" />
+<link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-<div id="app" class="layout">
-  <aside id="sidebar">
-    <div class="brand">
-      <img id="brandIcon" src="icon.png" alt="Rev TechingMaster" />
-      <div class="brand-text">Rev TechingMaster</div>
-    </div>
-    <nav id="nav"></nav>
-    <div class="side-foot">
-      <button id="btn-theme" title="切换浅色/深色主题">主题：浅/深</button>
-      <div class="proxy-state" id="proxy-state">未连接服务器</div>
-    </div>
-  </aside>
+  <div id="app">
+    <!-- 左侧：手机式三 Tab 面板（与平板版一致） -->
+    <aside id="leftPane" class="left-pane">
+      <div class="pane-head">
+        <div class="pane-title" id="paneTitle">备课助手</div>
+        <div class="pane-brand">Rev TechingMaster</div>
+      </div>
+      <div class="pane-grid-wrap" id="gridWrap"></div>
+      <div class="tabbar" id="tabbar">
+        <div class="tabbar-indicator" id="tabIndicator"></div>
+        <div class="tabbar-btns" id="tabBtns"></div>
+      </div>
+    </aside>
 
-  <main id="content">
-    <header id="page-head">
-      <h1 id="page-title">教案生成</h1>
-      <div id="head-note" class="note-chip">AI 生成内容仅供参考，请结合实际审核后使用</div>
-    </header>
-    <section id="pages"></section>
-  </main>
-</div>
-
-<script src="app.js"></script>
+    <!-- 右侧：所选工具页面 -->
+    <main id="rightPane" class="right-pane"></main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="js/i18n-data.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

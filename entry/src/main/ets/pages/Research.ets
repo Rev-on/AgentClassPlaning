@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 教研科研辅助：选题建议 / 论文大纲 / 摘要润色 三种模式（双语界面 + 深浅主题）
  */
 import common from '@ohos.app.ability.common';
@@ -12,9 +12,8 @@ import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
-@Entry
 @Component
-struct Research {
+export struct ResearchContent {
   @State mode: number = 0;   // 0 选题建议 1 论文大纲 2 摘要润色
   @State input: string = '我教八年级物理，想研究如何利用错题本提升学生物理成绩，请给选题建议';
   @State remark: string = '';
@@ -24,6 +23,8 @@ struct Research {
   @State blink: boolean = false;
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  /** 2in1 独立页面（IndexWideDuo 下半屏）渲染时由壳传入 true：本组件不内嵌结果区 */
+  bottomResult: boolean = false;
   private blinkTimer: number = -1;
 
   aboutToAppear(): void {
@@ -183,7 +184,9 @@ struct Research {
       .backgroundColor(this.col('card'))
       .borderRadius(14)
 
-      if (this.loading) {
+      if (this.bottomResult) {
+        // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
+      } else if (this.loading) {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#7B61C2')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
@@ -231,5 +234,25 @@ struct Research {
     .height('100%')
     .padding(12)
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct ResearchEntry {
+  build() {
+    Column() {
+      ResearchContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

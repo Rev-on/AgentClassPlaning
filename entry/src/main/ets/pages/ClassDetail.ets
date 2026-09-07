@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 班级详情：学生名单管理（增删）与 Excel / Word 名单导入
  * 所有改动即时保存到本机，不上云
  */
@@ -12,9 +12,10 @@ import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 
-@Entry
 @Component
-struct ClassDetail {
+export struct ClassDetailContent {
+  /** 班级 id：入口页从路由参数读取后传入；平板两栏模式下由班级管理组件直接传入 */
+  @Prop cid: number = -1;
   @State cur: ClassItem = { id: -1, name: '', students: [] };
   @State loaded: boolean = false;
   @State inName: string = '';
@@ -34,11 +35,9 @@ struct ClassDetail {
 
   aboutToAppear(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
-    const params = router.getParams() as Record<string, string>;
-    const cid: number = params['cid'] === undefined ? -1 : Number(params['cid']);
     ClassStore.loadAll(ctx).then((list: ClassItem[]) => {
       for (let i = 0; i < list.length; i++) {
-        if (list[i].id === cid) {
+        if (list[i].id === this.cid) {
           this.cur = list[i];
           break;
         }
@@ -314,5 +313,33 @@ struct ClassDetail {
     .width('100%')
     .height('100%')
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct ClassDetailEntry {
+  @State cid: number = -1;
+
+  aboutToAppear(): void {
+    const params = router.getParams() as Record<string, string>;
+    const v: number = params['cid'] === undefined ? -1 : Number(params['cid']);
+    this.cid = v;
+  }
+
+  build() {
+    Column() {
+      ClassDetailContent({ cid: this.cid })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

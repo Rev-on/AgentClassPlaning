@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 排座位表：输入学生身高与座位布局（排数 × 每排人数）
  *  可选：讲台两边有座位（+2 座：最矮两人坐讲台左、右）
  *  - 优化贪心：身高升序 → 蛇形填充（同排相邻差最小）→ 逐列前后排矫正（前排不高于后排）迭代至稳定
@@ -144,9 +144,8 @@ class SeatsAlgorithm {
   }
 }
 
-@Entry
 @Component
-struct Seats {
+export struct SeatsContent {
   @State rowsText: string = '8';
   @State colsText: string = '6';
   @State studentText: string = '';
@@ -895,5 +894,25 @@ struct Seats {
     .width('100%')
     .height('100%')
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct SeatsEntry {
+  build() {
+    Column() {
+      SeatsContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

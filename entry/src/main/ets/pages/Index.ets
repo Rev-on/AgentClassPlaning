@@ -4,12 +4,19 @@
  */
 import router from '@ohos.router';
 import common from '@ohos.app.ability.common';
+import display from '@ohos.display';
+import { window } from '@kit.ArkUI';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { AcceptStore } from '../common/AcceptStore';
 import { GenTask } from '../common/GenTask';
+import { Greeting } from '../common/Greeting';
+import { ResultBus } from '../common/ResultBus';
+import { DuoDetect } from '../common/DuoDetect';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
+import { IndexWide } from './IndexWide';
+import { IndexWideDuo } from './IndexWideDuo';
 
 /** 免责声明弹窗：首次启动显示，倒计时 5 秒后方可同意；同意后永久不再显示 */
 @CustomDialog
@@ -176,15 +183,170 @@ struct FunCard {
 @Entry
 @Component
 struct Index {
-  @StorageProp('appLang') appLang: string = 'zh';
+  @StorageProp('appLang') @Watch('onLangChanged') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  /** 首页问候：大字/小字文案 key（随系统时间与工作日/节假日变化） */
+  @State greetBigKey: string = 'greet.big.morning';
+  @State greetSmallKey: string = 'greet.work.morning';
+  /** 打字机已显示字符数 */
+  @State greetBigLen: number = 0;
+  @State greetSmallLen: number = 0;
+  private greetTimer: number = -1;
+  /** 平板/横屏两栏模式（AppStorage 全局标志，供功能页感知以隐藏返回按钮/内嵌导航） */
+  @StorageProp('appWideLayout') wideLayout: boolean = false;
+  /** 2in1 全屏上下分屏模式（仅华为 2in1 且磁吸键盘未连接时启用） */
+  @StorageProp('appDuo') appDuo: boolean = false;
+  private win: window.Window | undefined = undefined;
+  /** 最近一次窗口尺寸（vp），供键盘热插拔后重新判定形态 */
+  private lastVw: number = 0;
+  private lastVh: number = 0;
   private dialogController: CustomDialogController = new CustomDialogController({
     builder: DisclaimerDialog(),
     autoCancel: false
   });
 
+  /** 问候大字当前可见文本（打字机逐字展开；语言切换后按新词典续显） */
+  private shownBig(): string {
+    return I18n.t(this.greetBigKey).slice(0, this.greetBigLen);
+  }
+
+  /** 问候小字当前可见文本 */
+  private shownSmall(): string {
+    return I18n.t(this.greetSmallKey).slice(0, this.greetSmallLen);
+  }
+
+  /** 界面语言切换后重新播放问候打字机（文案随新语言词典逐字出现） */
+  private onLangChanged(): void {
+    this.startGreeting();
+  }
+
+  /** 判定并应用两栏布局（宽>高 且 宽>=900vp 且 高>=520vp，覆盖主流平板横屏） */
+  private applyWide(vw: number, vh: number): void {
+    this.lastVw = vw;
+    this.lastVh = vh;
+    const wide: boolean = vw > vh && vw >= 900 && vh >= 520;
+    AppStorage.setOrCreate('appWideLayout', wide);
+    this.refreshDuo(vw, vh);
+  }
+
+  /** 2in1 上下分屏判定（配合设置页 duoLayout：auto=自动检测 / on=强开 / off=关闭）
+   *  自动：仅 2in1 设备、大横屏、磁吸键盘未连接时启用（键盘模式=平板布局）
+   */
+  private refreshDuo(vw: number, vh: number): void {
+    const mode: string = AppStorage.get<string>('duoLayout') || 'auto';
+    if (mode === 'off') {
+      AppStorage.setOrCreate('appDuo', false);
+      return;
+    }
+    const wide: boolean = vw > vh && vw >= 900 && vh >= 520;
+    if (mode === 'on') {
+      // 手动强开（用于 2in1 设备形态识别不准确的兜底；鸿蒙 wideLayout 场景下生效）
+      AppStorage.setOrCreate('appDuo', wide && DuoDetect.manualAllowed());
+      return;
+    }
+    const candidate: boolean = DuoDetect.supported() && wide && vw >= 1000 && vh >= 760;
+    if (!candidate) {
+      AppStorage.setOrCreate('appDuo', false);
+      return;
+    }
+    DuoDetect.keyboardDocked().then((kb: boolean) => {
+      AppStorage.setOrCreate('appDuo', !kb);
+    }).catch(() => {
+      AppStorage.setOrCreate('appDuo', false);
+    });
+  }
+
+  /** 输入设备（磁吸键盘）插拔后按最近窗口尺寸重新判定形态 */
+  private onDeviceChange(): void {
+    if (this.lastVw > 0 && this.lastVh > 0) {
+      this.refreshDuo(this.lastVw, this.lastVh);
+    }
+  }
+
+  /** 设置页切换“结果屏布局”后立即重新判定（无需旋转/重启） */
+  private onDuoSetChange(): void {
+    if (this.lastVw > 0 && this.lastVh > 0) {
+      this.refreshDuo(this.lastVw, this.lastVh);
+    }
+  }
+
+  /** 按当前窗口尺寸立即刷新一次两栏判定 */
+  private refreshWide(): void {
+    try {
+      const d = display.getDefaultDisplaySync();
+      this.applyWide(px2vp(d.width), px2vp(d.height));
+    } catch (e) {
+      AppStorage.setOrCreate('appWideLayout', false);
+    }
+  }
+
+  /** 注册窗口尺寸监听：旋转 / 分屏后即时切换两栏与窄屏；键盘插拔监听用于 2in1 形态切换 */
+  private initWideLayout(): void {
+    this.refreshWide();
+    const ctx = getContext(this) as common.UIAbilityContext;
+    window.getLastWindow(ctx).then((mw: window.Window) => {
+      this.win = mw;
+      mw.on('windowSizeChange', (sz: window.Size) => {
+        this.applyWide(px2vp(sz.width), px2vp(sz.height));
+      });
+    }).catch(() => {
+      // 无法获取窗口时保持初始判定
+    });
+    DuoDetect.attach(() => {
+      this.onDeviceChange();
+    });
+  }
+
+  aboutToDisappear(): void {
+    if (this.win !== undefined) {
+      try {
+        this.win.off('windowSizeChange');
+      } catch (e) {
+        // ignore
+      }
+      this.win = undefined;
+    }
+    DuoDetect.detach();
+  }
+
+  /** 启动问候打字机：大字逐字出现后小字逐字出现（快速效果） */
+  private startGreeting(): void {
+    if (this.greetTimer !== -1) {
+      clearInterval(this.greetTimer);
+      this.greetTimer = -1;
+    }
+    const g = Greeting.forNow();
+    this.greetBigKey = g.bigKey;
+    this.greetSmallKey = g.smallKey;
+    this.greetBigLen = 0;
+    this.greetSmallLen = 0;
+    this.greetTimer = setInterval(() => {
+      const big: string = I18n.t(this.greetBigKey);
+      const small: string = I18n.t(this.greetSmallKey);
+      if (this.greetBigLen < big.length) {
+        this.greetBigLen = Math.min(big.length, this.greetBigLen + (big.length > 12 ? 2 : 1));
+        return;
+      }
+      if (this.greetSmallLen < small.length) {
+        this.greetSmallLen = Math.min(small.length, this.greetSmallLen + (small.length > 24 ? 3 : 1));
+        return;
+      }
+      if (this.greetTimer !== -1) {
+        clearInterval(this.greetTimer);
+        this.greetTimer = -1;
+      }
+    }, 70);
+  }
+
   aboutToAppear(): void {
     this.ensureFonts();
+    // 2in1 形态与结果面板初始占位（避免 @StorageProp/@StorageLink 首帧未绑定）
+    AppStorage.setOrCreate('appDuo', false);
+    ResultBus.init();
+    // 进入应用：按时段与工作日/节假日计算问候语并逐字显示
+    this.startGreeting();
+    // 平板/横屏两栏布局检测（旋转/分屏自动切换）
+    this.initWideLayout();
     // 首次进入（未同意过免责声明）时弹出使用须知
     const ctx = getContext(this) as common.UIAbilityContext;
     AcceptStore.getAccepted(ctx).then((acc: boolean) => {
@@ -233,6 +395,23 @@ struct Index {
   }
 
   build() {
+    if (this.wideLayout) {
+      if (this.appDuo) {
+        // 华为 2in1 全屏（无磁吸键盘）：上半屏平板界面 + 下半屏结果大面板
+        Column() {
+          IndexWideDuo()
+        }
+        .width('100%')
+        .height('100%')
+      } else {
+        // 平板/横屏 / 2in1 磁吸键盘模式：左导航 + 右内容两栏
+        Column() {
+          IndexWide()
+        }
+        .width('100%')
+        .height('100%')
+      }
+    } else {
     Tabs({ barPosition: BarPosition.End }) {
       // ============ Tab1 备课助手 ============
       TabContent() {
@@ -240,14 +419,15 @@ struct Index {
           Column({ space: 14 }) {
             Row() {
               Column({ space: 4 }) {
+                // 第一屏头部：按系统时间/工作日节假日显示问候语（打字机逐字出现）
                 VerticalMongolianText({
-                  content: this.t('tab.assistant'),
+                  content: this.shownBig(),
                   textSize: 22,
                   textColor: this.col('title'),
                   isBold: true
                 })
                 VerticalMongolianText({
-                  content: this.t('sub.assistant'),
+                  content: this.shownSmall(),
                   textSize: 12,
                   textColor: this.col('hint')
                 })
@@ -442,5 +622,6 @@ struct Index {
     .barHeight(56)
     .scrollable(false)
     .backgroundColor(this.col('bg'))
+    }
   }
 }

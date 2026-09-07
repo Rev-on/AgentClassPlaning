@@ -37,6 +37,8 @@
         "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:startIcon",
         "startWindowBackground": "$color:start_window_background",
+        "minWindowWidth": 640,
+        "minWindowHeight": 640,
         "exported": true,
         "skills": [
           {

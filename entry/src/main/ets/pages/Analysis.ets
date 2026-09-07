@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 学情分析与报告：粘贴 Excel 成绩数据（Tab 分隔），AI 生成学情分析报告
  * 用法：在 Excel 中框选数据区域 → Ctrl+C 复制 → 长按本页输入框粘贴
  * 双语界面 + 深浅主题
@@ -16,9 +16,8 @@ import { ExcelFileImporter } from '../common/ExcelFileImporter';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
-@Entry
 @Component
-struct Analysis {
+export struct AnalysisContent {
   @State excelText: string = I18n.t('def.excel');
   @State remark: string = '';
   @State previewRows: string[][] = [];
@@ -26,6 +25,8 @@ struct Analysis {
   @State result: string = '';
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  /** 2in1 独立页面（IndexWideDuo 下半屏）渲染时由壳传入 true：本组件不内嵌结果区 */
+  bottomResult: boolean = false;
 
   private t(key: string): string {
     void this.appLang;
@@ -240,7 +241,9 @@ struct Analysis {
       .backgroundColor(this.col('card'))
       .borderRadius(14)
 
-      if (this.loading) {
+      if (this.bottomResult) {
+        // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
+      } else if (this.loading) {
         Row({ space: 10 }) {
           LoadingProgress().width(26).height(26).color('#3E948A')
           Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
@@ -276,5 +279,25 @@ struct Analysis {
     .height('100%')
     .padding(12)
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct AnalysisEntry {
+  build() {
+    Column() {
+      AnalysisContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

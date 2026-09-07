@@ -37,6 +37,8 @@ interface PendingTask {
   type: string;
   label: string;
   taskId: string;
+  /** 运行中反馈是否为实况窗模式（recover 据此决定是否重建"生成中"普通通知） */
+  lv?: boolean;
 }
 
 /** 提交任务响应 */
@@ -189,7 +191,7 @@ export class GenTask {
     }
   }
 
-  private static async publishLocal(seed: number, title: string, text: string): Promise<void> {
+  private static async publishLocal(seed: number, title: string, text: string, ongoing: boolean = false): Promise<void> {
     const request: notificationManager.NotificationRequest = {
       id: seed,
       content: {
@@ -198,7 +200,10 @@ export class GenTask {
           title: title,
           text: text
         }
-      }
+      },
+      // 常驻(ONGOING)：支持的系统上"生成中"通知不可被用户手动清除；
+      // 官方当前将 isOngoing 标注为预留能力，不支持时静默忽略（另有轮询心跳兜底重建）
+      isOngoing: ongoing
     };
     try {
       await notificationManager.publish(request);
@@ -224,8 +229,16 @@ export class GenTask {
       // 权益未申请/开关未开/非前台等：回退普通通知
     }
     void ctx;
-    await GenTask.publishLocal(seed, title, text);
+    // 回退为"生成中"普通通知：标记常驻（支持的系统上不可手动清除），删除后由轮询心跳即时重建
+    await GenTask.publishLocal(seed, title, text, true);
     return false;
+  }
+
+  /** 心跳重建"生成中"普通通知（非实况窗模式）：若被用户/系统清除，立即以相同 seed 恢复，达到常驻效果 */
+  static async refreshRunning(seed: number, type: string): Promise<void> {
+    const title: string = GenTask.tpl('notify.runningTitle', type);
+    const text: string = GenTask.tpl('notify.runningText', type);
+    await GenTask.publishLocal(seed, title, text, true);
   }
 
   /** 更新实况窗进度（仅当实况窗模式） */
@@ -372,6 +385,20 @@ export class GenTask {
     }
   }
 
+  /** 记录运行中反馈是否为实况窗模式（recover 据此判断是否需要重建"生成中"普通通知） */
+  static async markRunningMode(ctx: common.UIAbilityContext, lv: boolean): Promise<void> {
+    try {
+      const p = await GenTask.loadPending(ctx);
+      if (p === null) {
+        return;
+      }
+      p.lv = lv;
+      await GenTask.savePending(ctx, p);
+    } catch (e) {
+      // ignore
+    }
+  }
+
   private static async loadPending(ctx: common.UIAbilityContext): Promise<PendingTask | null> {
     try {
       const store = await GenTask.prefs(ctx);
@@ -434,8 +461,11 @@ export class GenTask {
       await GenTask.stopLiveLocal(p.seed, p.label);
       await GenTask.publishResult(p.seed, p.label, false);
       await GenTask.clearPending(ctx);
-    } else {
-      // running：实况窗/生成中通知由系统或原反馈保持展示，无需重建，继续保持 pending
+    } else if (p.lv !== true) {
+      // running + 普通通知模式：进程重启后系统可能已清理该通知（用户也可能误删），
+      // 重建"生成中"常驻通知，避免任务状态从通知栏消失而被误判为生成失败
+      await GenTask.publishRunning(ctx, p.seed, p.label);
     }
+    // running + 实况窗模式：实况窗跨进程保留，服务端完成时会结束实况窗并下发完成通知，无需重建；继续保持 pending
   }
 }

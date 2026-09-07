@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 历史记录页：展示全部已保存的生成记录（支持中英双语与深浅主题）
  */
 import common from '@ohos.app.ability.common';
@@ -112,9 +112,8 @@ struct HistoryDetailDialog {
   }
 }
 
-@Entry
 @Component
-struct History {
+export struct HistoryContent {
   @State records: HistoryRecord[] = [];
   @State dialogTitle: string = '';
   @State dialogContent: string = '';
@@ -267,5 +266,25 @@ struct History {
     .height('100%')
     .padding(16)
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct HistoryEntry {
+  build() {
+    Column() {
+      HistoryContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

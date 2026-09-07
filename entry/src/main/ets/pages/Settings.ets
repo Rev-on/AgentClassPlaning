@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 设置页：语言（下拉）、主题（下拉：浅色/深色/跟随系统）、关于、AGPL 与水印
  */
 import common from '@ohos.app.ability.common';
@@ -13,14 +13,15 @@ import { PageHeader } from '../common/components/PageHeader';
 /** 开源仓库地址（GitCode），点击后经系统浏览器打开 */
 const REPO_URL: string = 'https://gitcode.com/RTX6090/Techingmaster';
 
-@Entry
 @Component
-struct Settings {
+export struct SettingsContent {
   @StorageLink('appLang') appLang: string = 'zh';
-  @StorageLink('appTheme') appTheme: string = 'light';
+  @StorageLink('appTheme') appTheme: string = 'system';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
   /** 生成结果自动保存到历史（默认开） */
   @StorageLink('autoSaveHist') autoSave: boolean = true;
+  /** 2in1 结果分屏布局：auto=自动 / on=总是下半屏 / off=关闭 */
+  @StorageLink('duoLayout') duoLayout: string = 'auto';
 
   private t(key: string): string {
     void this.appLang;
@@ -123,6 +124,37 @@ struct Settings {
     });
   }
 
+  /** 2in1 结果分屏下拉选项 */
+  private duoOptions(): SelectOption[] {
+    return [
+      { value: this.t('set.duoAuto') },
+      { value: this.t('set.duoOn') },
+      { value: this.t('set.duoOff') }
+    ];
+  }
+
+  /** 当前结果分屏选项下标 */
+  private duoIndex(): number {
+    if (this.duoLayout === 'on') {
+      return 1;
+    }
+    if (this.duoLayout === 'off') {
+      return 2;
+    }
+    return 0;
+  }
+
+  /** 切换结果分屏布局（保存后由 Index 尺寸/形态监听即时重判） */
+  private switchDuo(value: string): void {
+    if (this.duoLayout === value) {
+      return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    AppSettings.saveDuoLayout(ctx, value).then(() => {
+      promptAction.showToast({ message: I18n.t('set.duoHint') });
+    });
+  }
+
   /** 切换“自动保存到历史” */
   private switchAutoSave(on: boolean): void {
     const ctx = getContext(this) as common.UIAbilityContext;
@@ -192,6 +224,36 @@ struct Settings {
               .onSelect((index: number) => {
                 const themes: string[] = ['light', 'dark', 'system'];
                 this.switchTheme(themes[index]);
+              })
+          }
+          .width('100%')
+          .padding(16)
+          .backgroundColor(this.col('card'))
+          .borderRadius(14)
+          .alignItems(HorizontalAlign.Start)
+
+          // 2in1 结果屏布局（自动 / 下半屏 / 关闭）
+          Column({ space: 10 }) {
+            Text(this.t('set.duo'))
+              .fontFamily(AppFonts.family())
+              .fontSize(13)
+              .fontColor(this.col('sub'))
+              .width('100%')
+            Text(this.t('set.duoDesc'))
+              .fontFamily(AppFonts.family())
+              .fontSize(11)
+              .fontColor(this.col('hint'))
+              .width('100%')
+              .lineHeight(16)
+            Select(this.duoOptions())
+              .selected(this.duoIndex())
+              .value(this.duoOptions()[this.duoIndex()].value as string)
+              .fontColor(this.col('text'))
+              .selectedOptionFontColor('#4A90D9')
+              .width('100%')
+              .onSelect((index: number) => {
+                const modes: string[] = ['auto', 'on', 'off'];
+                this.switchDuo(modes[index]);
               })
           }
           .width('100%')
@@ -344,5 +406,25 @@ struct Settings {
     .height('100%')
     .padding(12)
     .backgroundColor(this.col('bg'))
+  }
+}
+
+
+@Entry
+@Component
+struct SettingsEntry {
+  build() {
+    Column() {
+      SettingsContent()
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  pageTransition() {
+    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Right)
+    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
+      .slide(SlideEffect.Left)
   }
 }

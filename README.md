@@ -58,7 +58,7 @@ pages/Settings      设置
 | 层面 | 选型 |
 | --- | --- |
 | 开发语言 | ArkTS（声明式 UI），Stage 模型 |
-| 系统版本 | HarmonyOS，targetSdk / compatibleSdkVersion 26.0.0 |
+| 系统版本 | HarmonyOS，targetSdk / compatibleSdkVersion 6.0.0(20) |
 | AI 接入 | 自建中转代理（`server/`）→ DeepSeek 开放接口，默认模型 deepseek-v4-flash |
 | 本地存储 | Preferences（设置、历史、班级名单、免责声明状态） |
 | 文档能力 | 自研 OOXML 导出（Word）、ExcelJS 读写（xlsx）、jszip 解析（docx） |
