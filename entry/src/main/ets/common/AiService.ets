@@ -9,6 +9,7 @@ import common from '@ohos.app.ability.common';
 import { ApiConfig } from './ApiConfig';
 import { GenTask } from './GenTask';
 import { HistoryStore } from './HistoryStore';
+import { ResultBus } from './ResultBus';
 
 /** 对话消息 */
 interface ChatMessage {
@@ -59,6 +60,11 @@ interface ChatResponse {
   error?: ApiError;
 }
 
+/** 任务模式控制信息：记录任务是否已被服务端接受（提交成功） */
+interface TaskCtl {
+  accepted: boolean;
+}
+
 export class AiService {
   /** 最大尝试次数（首次 + 2 次重试） */
   private static readonly MAX_ATTEMPTS: number = 3;
@@ -74,23 +80,72 @@ export class AiService {
    */
   static async chat(systemPrompt: string, userPrompt: string, onDelta?: (partial: string) => void,
     skipNote: boolean = false, opts?: AiTaskOpts): Promise<string> {
-    if (opts !== undefined && opts.ctx !== undefined) {
-      try {
-        return await AiService.chatByTask(systemPrompt, userPrompt, skipNote, onDelta, opts);
-      } catch (e) {
-        // 任务链路不可用（网络/服务器旧版）时回退到传统同步请求，保证可用
-      }
+    // 2in1 上下分屏（appDuo）：本次生成镜像发布到下半屏结果面板（busy=生成中）
+    const duoBus: boolean = AiService.duoActive(opts);
+    if (duoBus && opts !== undefined) {
+      ResultBus.live(opts.type, opts.label, opts.label, '');
     }
-    let lastErr: Error = new Error('AI 请求失败，请稍后重试');
-    for (let attempt: number = 0; attempt < AiService.MAX_ATTEMPTS; attempt++) {
-      try {
-        const raw: string = await AiService.requestOnce(systemPrompt, userPrompt);
-        return AiService.withAiNote(raw, skipNote);
-      } catch (e) {
-        lastErr = e instanceof Error ? e : new Error('AI 请求失败，请稍后重试');
+    try {
+      if (opts !== undefined && opts.ctx !== undefined) {
+        // 任务已提交成功的标志：一旦服务端接受任务，后续任务态失败/超时不再回退直连重发
+        // （否则会把同一篇内容再完整生成一遍，等待时间成倍叠加且可能双份计费/双份通知）
+        const ctl: TaskCtl = { accepted: false };
+        try {
+          const byTask: string = await AiService.chatByTask(systemPrompt, userPrompt, skipNote, onDelta, opts, ctl);
+          AiService.mirrorDone(duoBus, opts, byTask);
+          return byTask;
+        } catch (e) {
+          if (ctl.accepted) {
+            // 服务端已接受任务：结果由轮询/通知/recover 兜底，直接上报任务结果，避免重复生成
+            throw e;
+          }
+          // 提交阶段失败（旧版服务端/网络不通等）：回退到传统同步请求，保证可用
+        }
       }
+      let lastErr: Error = new Error('AI 请求失败，请稍后重试');
+      for (let attempt: number = 0; attempt < AiService.MAX_ATTEMPTS; attempt++) {
+        try {
+          const raw: string = await AiService.requestOnce(systemPrompt, userPrompt);
+          const out: string = AiService.withAiNote(raw, skipNote);
+          if (opts !== undefined) {
+            AiService.mirrorDone(duoBus, opts, out);
+          }
+          return out;
+        } catch (e) {
+          lastErr = e instanceof Error ? e : new Error('AI 请求失败，请稍后重试');
+        }
+      }
+      throw lastErr;
+    } catch (e) {
+      if (duoBus) {
+        // 生成失败：下屏结果面板复位为空态，避免停留在"生成中"
+        ResultBus.clear();
+      }
+      if (e instanceof Error) {
+        throw e;
+      }
+      throw new Error('AI 请求失败，请稍后重试');
     }
-    throw lastErr;
+  }
+
+  /** 是否处于 2in1 上下分屏形态（此时需把结果镜像发布到下半屏面板） */
+  private static duoActive(opts: AiTaskOpts | undefined): boolean {
+    if (opts === undefined || opts.ctx === undefined) {
+      return false;
+    }
+    return AppStorage.get<boolean>('appDuo') === true;
+  }
+
+  /** 生成完成：把与手机/平板完全一致的结果内容发布到下屏结果面板（空内容按失败复位） */
+  private static mirrorDone(duo: boolean, opts: AiTaskOpts, content: string): void {
+    if (!duo) {
+      return;
+    }
+    if (content === '') {
+      ResultBus.clear();
+      return;
+    }
+    ResultBus.done(opts.type, opts.label, opts.label, content);
   }
 
   /**
@@ -98,9 +153,11 @@ export class AiService {
    * 页面销毁后（gone()=true）不再回调 UI，改为静默保存历史并更新通知；进程被杀则完全依赖服务端完成与推送。
    */
   private static async chatByTask(systemPrompt: string, userPrompt: string, skipNote: boolean,
-    onDelta: ((partial: string) => void) | undefined, opts: AiTaskOpts): Promise<string> {
+    onDelta: ((partial: string) => void) | undefined, opts: AiTaskOpts, ctl: TaskCtl): Promise<string> {
     const seed: number = GenTask.nextSeed();
     const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt, seed);
+    // 提交成功：服务端已接受任务并开始生成，此后任何任务态失败都不应回退直连重发
+    ctl.accepted = true;
     // 生成中反馈：实况窗（PROGRESS 进度）优先，不可用回退常驻"生成中"通知
     const lvOk: boolean = await GenTask.publishRunning(opts.ctx, seed, opts.label);
     if (lvOk) {

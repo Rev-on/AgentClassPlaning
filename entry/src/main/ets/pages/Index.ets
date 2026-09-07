@@ -195,8 +195,15 @@ struct Index {
   /** 平板/横屏两栏模式（AppStorage 全局标志，供功能页感知以隐藏返回按钮/内嵌导航） */
   @StorageProp('appWideLayout') wideLayout: boolean = false;
   /** 2in1 全屏上下分屏模式（仅华为 2in1 且磁吸键盘未连接时启用） */
-  @StorageProp('appDuo') appDuo: boolean = false;
+  @StorageProp('appDuo') @Watch('onDuoModeChanged') appDuo: boolean = false;
   private win: window.Window | undefined = undefined;
+  /** 跨轴铺窗（瀑布模式）是否正在执行 / 已生效：用于去重与防抖 */
+  private spanBusy: boolean = false;
+  private spanDone: boolean = false;
+  /** 跨轴铺窗看门狗（每 800ms 校验一次窗口是否真正铺满上下两屏） */
+  private spanTimer: number = -1;
+  private lastSpanTry: number = 0;
+  private spanFailCount: number = 0;
   /** 最近一次窗口尺寸（vp），供键盘热插拔后重新判定形态 */
   private lastVw: number = 0;
   private lastVh: number = 0;
@@ -220,13 +227,18 @@ struct Index {
     this.startGreeting();
   }
 
-  /** 判定并应用两栏布局（宽>高 且 宽>=900vp 且 高>=520vp，覆盖主流平板横屏） */
+  /** 判定并应用两栏布局（宽>高 且 宽>=900vp 且 高>=520vp，覆盖主流平板横屏）
+   *  半折叠双屏形态（无磁吸键盘，displayId=999 存在）铺窗后窗口呈上下竖长，仍须按宽屏 duo 处理 */
   private applyWide(vw: number, vh: number): void {
     this.lastVw = vw;
     this.lastVh = vh;
-    const wide: boolean = vw > vh && vw >= 900 && vh >= 520;
+    const geometryWide: boolean = vw > vh && vw >= 900 && vh >= 520;
+    const twoScreen: boolean = DuoDetect.supported() && DuoDetect.hasLowerHalf();
+    const wide: boolean = geometryWide || twoScreen;
     AppStorage.setOrCreate('appWideLayout', wide);
     this.refreshDuo(vw, vh);
+    // 窗口尺寸变化后（展开/半折切换、跨轴铺窗完成等）重试一次双屏铺窗，保证状态自愈
+    this.syncDuoWindow();
   }
 
   /** 2in1 上下分屏判定（配合设置页 duoLayout：auto=自动检测 / on=强开 / off=关闭）
@@ -238,21 +250,26 @@ struct Index {
       AppStorage.setOrCreate('appDuo', false);
       return;
     }
-    const wide: boolean = vw > vh && vw >= 900 && vh >= 520;
+    const geometryWide: boolean = vw > vh && vw >= 900 && vh >= 520;
+    // 半折叠双屏形态（物理下半屏存在）即使窗口偏小/偏竖也应启用 duo，铺窗后由 FoldSplitContainer 分配到上下两屏
+    const twoScreen: boolean = DuoDetect.supported() && DuoDetect.hasLowerHalf();
+    const wide: boolean = geometryWide || twoScreen;
     if (mode === 'on') {
       // 手动强开（用于 2in1 设备形态识别不准确的兜底；鸿蒙 wideLayout 场景下生效）
       AppStorage.setOrCreate('appDuo', wide && DuoDetect.manualAllowed());
       return;
     }
-    const candidate: boolean = DuoDetect.supported() && wide && vw >= 1000 && vh >= 760;
+    const candidate: boolean = (DuoDetect.supported() && geometryWide && vw >= 1000 && vh >= 760) || twoScreen;
     if (!candidate) {
       AppStorage.setOrCreate('appDuo', false);
       return;
     }
     DuoDetect.keyboardDocked().then((kb: boolean) => {
-      AppStorage.setOrCreate('appDuo', !kb);
+      // 半折叠双屏形态（下半屏已存在）必然无磁吸键盘遮挡，直接启用 duo，不再受外接键盘检测影响；
+      // 键盘吸回后下屏消失（twoScreen=false），此处自然回退为 !kb 判定
+      AppStorage.setOrCreate('appDuo', twoScreen || !kb);
     }).catch(() => {
-      AppStorage.setOrCreate('appDuo', false);
+      AppStorage.setOrCreate('appDuo', twoScreen);
     });
   }
 
@@ -267,6 +284,145 @@ struct Index {
   private onDuoSetChange(): void {
     if (this.lastVw > 0 && this.lastVh > 0) {
       this.refreshDuo(this.lastVw, this.lastVh);
+    }
+  }
+
+  /** duo 形态变化（键盘热插拔 / 设置切换 / 启动检测完成）后同步窗口：半折叠双屏时把结果铺到物理下半屏 */
+  private onDuoModeChanged(): void {
+    this.syncDuoWindow();
+  }
+
+  /**
+   * 双屏铺窗同步：
+   *  - duo 开启且处于半折叠双屏形态（displayId=999 存在）→ 把主窗口跨轴铺满上下两屏，
+   *    IndexWideDuo 上半屏=工具界面、下半屏=生成结果大面板；未铺满前由看门狗持续重试
+   *  - duo 开启但单屏（展开平板）→ 保持原有内嵌布局
+   *  - duo 关闭且双屏仍存在（手动关闭）→ 收回跨轴窗口；键盘吸回（下半屏消失）由系统自动收拢
+   */
+  private syncDuoWindow(): void {
+    // 同步“跨轴双屏”标志：供 IndexWideDuo 决定用手动精确分区还是 FoldSplitContainer
+    const duo: boolean = this.appDuo;
+    const twoScreen: boolean = duo && DuoDetect.supported() && DuoDetect.hasLowerHalf();
+    AppStorage.setOrCreate('appTwoScreen', twoScreen);
+    const mw: window.Window | undefined = this.win;
+    if (duo && twoScreen) {
+      // 事件触发时重置失败计数，允许重新尝试
+      this.spanFailCount = 0;
+      if (mw !== undefined) {
+        this.ensureSpanned(mw);
+        this.startSpanWatchdog(mw);
+      }
+    } else {
+      this.stopSpanWatchdog();
+      const wasSpanned: boolean = this.spanDone;
+      this.spanDone = false;
+      if (wasSpanned && DuoDetect.hasLowerHalf()) {
+        this.collapseFold();
+      }
+    }
+  }
+
+  /** 主窗口是否已真正跨轴铺满上下两屏（用窗口实际矩形与上屏高度比对，避免误判） */
+  private isSpanned(mw: window.Window): boolean {
+    try {
+      const up = display.getDisplayByIdSync(0);
+      if (up === undefined) {
+        return false;
+      }
+      const r = mw.getWindowProperties().windowRect;
+      // 铺满后窗口高度 ≈ 上屏+折痕+下屏，远大于单上屏高度
+      return r.height > up.height + 100;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 未铺满时触发一次跨轴最大化（busy 去重） */
+  private ensureSpanned(mw: window.Window): void {
+    if (this.spanBusy || this.isSpanned(mw)) {
+      return;
+    }
+    this.spanDone = false;
+    this.lastSpanTry = Date.now();
+    this.trySpanFold(0);
+  }
+
+  /**
+   * 看门狗：双屏形态下每 800ms 校验一次窗口矩形，
+   * 未铺满则再次跨轴最大化（下屏/折叠状态就绪前一直重试，最多 30 次），铺满后自动停止。
+   */
+  private startSpanWatchdog(mw: window.Window): void {
+    if (this.spanTimer !== -1) {
+      return;
+    }
+    this.spanTimer = setInterval(() => {
+      if (!this.appDuo || !DuoDetect.hasLowerHalf() || this.isSpanned(mw)) {
+        this.stopSpanWatchdog();
+        return;
+      }
+      if (this.spanBusy) {
+        return;
+      }
+      if (this.spanFailCount >= 30) {
+        // 已多次失败（如系统不支持跨轴），停止轮询避免空转；等待下次形态事件再触发
+        this.stopSpanWatchdog();
+        return;
+      }
+      const now: number = Date.now();
+      if (now - this.lastSpanTry < 1000) {
+        return;
+      }
+      this.spanFailCount++;
+      this.lastSpanTry = now;
+      this.trySpanFold(0);
+    }, 800);
+  }
+
+  private stopSpanWatchdog(): void {
+    if (this.spanTimer !== -1) {
+      clearInterval(this.spanTimer);
+      this.spanTimer = -1;
+    }
+  }
+
+  /** 主窗口最大化时跨轴进入瀑布模式：窗口覆盖折叠电脑上、下两屏 */
+  private trySpanFold(attempt: number): void {
+    const mw: window.Window | undefined = this.win;
+    if (!this.appDuo || mw === undefined || this.spanBusy) {
+      return;
+    }
+    if (attempt > 4) {
+      return;
+    }
+    this.spanBusy = true;
+    try {
+      // acrossDisplay=true：半折叠态下主窗口进入瀑布模式（铺满上下两屏，结果面板真正落到物理下半屏）
+      mw.maximize(window.MaximizePresentation.ENTER_IMMERSIVE, true).then(() => {
+        this.spanBusy = false;
+        this.spanDone = this.isSpanned(mw);
+      }).catch(() => {
+        this.spanBusy = false;
+        // 形态/下屏可能尚未就绪，稍后由看门狗重试
+        setTimeout(() => this.trySpanFold(attempt + 1), 350);
+      });
+    } catch (e) {
+      this.spanBusy = false;
+      setTimeout(() => this.trySpanFold(attempt + 1), 350);
+    }
+  }
+
+  /** 收回跨轴窗口（回到仅占上半屏/单屏的常规窗口状态） */
+  private collapseFold(): void {
+    const mw: window.Window | undefined = this.win;
+    if (mw === undefined) {
+      return;
+    }
+    try {
+      mw.restore().catch(() => {
+        // 恢复失败时保持现状
+      });
+    } catch (e) {
+      // 恢复失败时保持现状
     }
   }
 
@@ -289,12 +445,36 @@ struct Index {
       mw.on('windowSizeChange', (sz: window.Size) => {
         this.applyWide(px2vp(sz.width), px2vp(sz.height));
       });
+      // 窗口就绪后再同步一次双屏铺窗（启动时 duo 判定可能先于窗口获取完成）
+      this.syncDuoWindow();
     }).catch(() => {
       // 无法获取窗口时保持初始判定
     });
     DuoDetect.attach(() => {
       this.onDeviceChange();
     });
+    // 显示器增删/变化（折叠电脑拆下键盘出现下半屏 displayId=999、吸回后消失）→ 延迟重判并同步铺窗
+    try {
+      display.on('add', () => {
+        this.onDisplayLayoutChange();
+      });
+      display.on('remove', () => {
+        this.onDisplayLayoutChange();
+      });
+      display.on('change', () => {
+        this.onDisplayLayoutChange();
+      });
+    } catch (e) {
+      // 不支持显示器监听时依赖键盘热插拔事件
+    }
+  }
+
+  /** 屏幕增删/变化后稍作延迟重判形态，等系统完成上下屏切换后再铺窗 */
+  private onDisplayLayoutChange(): void {
+    setTimeout(() => {
+      this.refreshWide();
+      this.syncDuoWindow();
+    }, 300);
   }
 
   aboutToDisappear(): void {
@@ -305,6 +485,14 @@ struct Index {
         // ignore
       }
       this.win = undefined;
+    }
+    this.stopSpanWatchdog();
+    try {
+      display.off('add');
+      display.off('remove');
+      display.off('change');
+    } catch (e) {
+      // ignore
     }
     DuoDetect.detach();
   }
@@ -342,6 +530,7 @@ struct Index {
     this.ensureFonts();
     // 2in1 形态与结果面板初始占位（避免 @StorageProp/@StorageLink 首帧未绑定）
     AppStorage.setOrCreate('appDuo', false);
+    AppStorage.setOrCreate('appTwoScreen', false);
     ResultBus.init();
     // 进入应用：按时段与工作日/节假日计算问候语并逐字显示
     this.startGreeting();
@@ -395,22 +584,22 @@ struct Index {
   }
 
   build() {
-    if (this.wideLayout) {
-      if (this.appDuo) {
-        // 华为 2in1 全屏（无磁吸键盘）：上半屏平板界面 + 下半屏结果大面板
-        Column() {
-          IndexWideDuo()
-        }
-        .width('100%')
-        .height('100%')
-      } else {
-        // 平板/横屏 / 2in1 磁吸键盘模式：左导航 + 右内容两栏
-        Column() {
-          IndexWide()
-        }
-        .width('100%')
-        .height('100%')
+    if (this.appDuo) {
+      // 华为 2in1 上下分屏（无磁吸键盘）：
+      // 半折叠双屏形态下窗口已跨轴铺开 → primary/上半屏=工具界面 + secondary/下半屏=生成结果；
+      // 展开单屏形态 → FoldSplitContainer 在单屏内上下分栏。
+      Column() {
+        IndexWideDuo()
       }
+      .width('100%')
+      .height('100%')
+    } else if (this.wideLayout) {
+      // 平板/横屏 / 2in1 磁吸键盘模式：左导航 + 右内容两栏
+      Column() {
+        IndexWide()
+      }
+      .width('100%')
+      .height('100%')
     } else {
     Tabs({ barPosition: BarPosition.End }) {
       // ============ Tab1 备课助手 ============
