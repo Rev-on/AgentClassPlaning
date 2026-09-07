@@ -19,8 +19,8 @@ export class ApiConfig {
   static readonly MODEL: string = 'deepseek-v4-flash';
   /** 连接超时（毫秒）：短连接超时便于快速失败重试 */
   static readonly CONNECT_TIMEOUT: number = 10000;
-  /** 读取超时（毫秒）：长输出留足时间，减少中途断流 */
-  static readonly READ_TIMEOUT: number = 150000;
+  /** 读取超时（毫秒）：长输出留足时间（与 server REQUEST_TIMEOUT_MS 一致），减少中途断流 */
+  static readonly READ_TIMEOUT: number = 300000;
   /** 生成温度（0-2，越小越稳定） */
   static readonly TEMPERATURE: number = 0.9;
   /** 最大输出 tokens */

@@ -119,15 +119,39 @@ function tokenOf(deviceId) {
   return d ? d.token : '';
 }
 
-/* ---------------- 串行执行队列（一次只跑一个任务，平稳调用上游） ---------------- */
+/* ---------------- 并发执行队列（默认同时最多 2 个任务，可配置） ---------------- */
 
-let tail = Promise.resolve();
+const CONCURRENCY = Math.max(1, Number(process.env.TASK_CONCURRENCY || 2));
+let active = 0;
+const queue = [];
+
+function pump() {
+  while (active < CONCURRENCY && queue.length > 0) {
+    const task = queue.shift();
+    active++;
+    task().then(() => {
+      active--;
+      pump();
+    }).catch((e) => {
+      active--;
+      console.error('[tasks] worker error: ' + (e && e.message ? e.message : String(e)));
+      pump();
+    });
+  }
+}
+
 function enqueue(worker) {
-  const run = tail.then(() => worker());
-  tail = run.catch((e) => {
-    console.error('[tasks] worker error: ' + (e && e.message ? e.message : String(e)));
+  return new Promise((resolve, reject) => {
+    const task = async () => {
+      try {
+        resolve(await worker());
+      } catch (e) {
+        reject(e);
+      }
+    };
+    queue.push(task);
+    pump();
   });
-  return run;
 }
 
 module.exports = { STATUS, create, get, listByDevice, patch, registerDevice, tokenOf, enqueue };

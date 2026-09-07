@@ -239,7 +239,7 @@ function runTask(taskId) {
   if (!task) {
     return;
   }
-  return tasks.enqueue(async () => {
+  tasks.enqueue(async () => {
     tasks.patch(taskId, { status: tasks.STATUS.RUNNING });
     try {
       const content = await fetchDeepSeek(task.system, task.user);
@@ -283,10 +283,10 @@ function runTask(taskId) {
         data: { taskId: taskId, type: task.type, status: 'failed' }
       }).catch((e) => console.error('[tasks] push fail 失败: ' + String(e && e.message || e)));
     }
-  });
+  }).catch((e) => console.error('[tasks] task error: ' + (e && e.message ? e.message : String(e))));
 }
 
-// 提交后台生成任务（立即返回 taskId；生成在服务端串行执行）
+// 提交后台生成任务（立即返回 taskId；生成在服务端按并发队列执行）
 app.post('/api/task', checkToken, (req, res) => {
   const body = req.body || {};
   const user = typeof body.user === 'string' ? body.user : '';

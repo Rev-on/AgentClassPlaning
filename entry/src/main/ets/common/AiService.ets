@@ -97,7 +97,10 @@ export class AiService {
         } catch (e) {
           if (ctl.accepted) {
             // 服务端已接受任务：结果由轮询/通知/recover 兜底，直接上报任务结果，避免重复生成
-            throw e;
+            if (e instanceof Error) {
+              throw e;
+            }
+            throw new Error('AI 生成失败，请稍后重试');
           }
           // 提交阶段失败（旧版服务端/网络不通等）：回退到传统同步请求，保证可用
         }

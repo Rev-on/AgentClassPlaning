@@ -22,6 +22,14 @@ export class AppSettings {
   private static readonly KEY_AUTOSAVE: string = 'autoSaveHist';
   /** 2in1 结果分屏布局：auto=自动检测 / on=手动强开 / off=关闭 */
   private static readonly KEY_DUO: string = 'duoLayout';
+  /** 应用内字号倍率（作用于全部 fp 文字；默认 1.0=标准） */
+  private static readonly KEY_FONT_SCALE: string = 'fontScale';
+
+  /** 字号档位倍率（对应设置页：小 / 标准 / 大 / 特大） */
+  static readonly FONT_PRESETS: number[] = [0.9, 1.0, 1.15, 1.3];
+  /** 字号倍率允许范围 */
+  static readonly FONT_MIN: number = 0.85;
+  static readonly FONT_MAX: number = 1.3;
 
   /** 启动时加载持久化设置并应用（默认：主题跟随系统、语言跟随系统语言） */
   static async load(context: common.UIAbilityContext): Promise<void> {
@@ -30,6 +38,7 @@ export class AppSettings {
     let autoSave: boolean = true;
     let manual: boolean = false;
     let duo: string = 'auto';
+    let fontScale: number = 1.0;
     try {
       const store = await preferences.getPreferences(context, AppSettings.STORE);
       const hasLang: boolean = await store.has(AppSettings.KEY_LANG);
@@ -37,12 +46,14 @@ export class AppSettings {
       const tv = await store.get(AppSettings.KEY_THEME, 'system');
       const av = await store.get(AppSettings.KEY_AUTOSAVE, true);
       const dv = await store.get(AppSettings.KEY_DUO, 'auto');
+      const fv = await store.get(AppSettings.KEY_FONT_SCALE, 1.0);
       // 语言：用户手动选过（存在保存值）用保存值；否则跟随系统语言
       manual = hasLang;
       lang = manual ? AppSettings.normalizeLang(lv as string) : AppSettings.systemLang();
       theme = AppSettings.normalizeTheme(tv as string);
       autoSave = (av as boolean) !== false;
       duo = AppSettings.normalizeDuo(dv as string);
+      fontScale = AppSettings.normalizeFontScale(fv as number);
     } catch (e) {
       // 默认值：主题跟随系统；语言跟随系统语言
       lang = AppSettings.systemLang();
@@ -53,7 +64,9 @@ export class AppSettings {
     AppStorage.setOrCreate(AppSettings.KEY_LANG_MANUAL, manual);
     AppStorage.setOrCreate(AppSettings.KEY_AUTOSAVE, autoSave);
     AppStorage.setOrCreate(AppSettings.KEY_DUO, duo);
+    AppStorage.setOrCreate(AppSettings.KEY_FONT_SCALE, fontScale);
     AppSettings.applyColorMode(context, theme);
+    AppSettings.applyFontScale(context, fontScale);
   }
 
   /** 读取"已同意免责声明"标记（默认 false） */
@@ -153,6 +166,43 @@ export class AppSettings {
     await store.put(AppSettings.KEY_AUTOSAVE, on);
     await store.flush();
     AppStorage.setOrCreate(AppSettings.KEY_AUTOSAVE, on);
+  }
+
+  /** 字号倍率白名单校验（非法值/越界值收敛到允许范围） */
+  private static normalizeFontScale(scale: number): number {
+    if (!(scale > 0) || Number.isNaN(scale)) {
+      return 1.0;
+    }
+    const v: number = Math.min(AppSettings.FONT_MAX, Math.max(AppSettings.FONT_MIN, scale));
+    return Math.round(v * 100) / 100;
+  }
+
+  /**
+   * 应用应用内字号倍率（作用于全部 fp 文字，全局即时生效）。
+   * @returns true=设置成功；false=当前系统/设备不支持（如系统版本低于 API 21）
+   */
+  static applyFontScale(context: common.UIAbilityContext, scale: number): boolean {
+    try {
+      const s: number = AppSettings.normalizeFontScale(scale);
+      context.getApplicationContext().setFontSizeScale(s);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 保存字号倍率并立即应用；返回是否应用成功（设备不支持时持久化值仍保留，重启后可再试） */
+  static async saveFontScale(context: common.UIAbilityContext, scale: number): Promise<boolean> {
+    const s: number = AppSettings.normalizeFontScale(scale);
+    try {
+      const store = await preferences.getPreferences(context, AppSettings.STORE);
+      await store.put(AppSettings.KEY_FONT_SCALE, s);
+      await store.flush();
+    } catch (e) {
+      // 持久化失败不阻塞应用
+    }
+    AppStorage.setOrCreate(AppSettings.KEY_FONT_SCALE, s);
+    return AppSettings.applyFontScale(context, s);
   }
 
   /** 应用系统颜色模式并计算实际生效主题 */

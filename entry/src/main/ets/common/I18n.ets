@@ -283,7 +283,17 @@ export class I18n {
     ['set.duoAuto', '自动'],
     ['set.duoOn', '总是显示在下半屏'],
     ['set.duoOff', '关闭（平板样式）'],
-    ['set.duoHint', '布局设置已保存，正在切换']
+    ['set.duoHint', '布局设置已保存，正在切换'],
+    ['set.fontScale', '字号大小'],
+    ['set.fontDesc', '调整正文与界面文字大小；点击"应用"后对整个应用生效'],
+    ['set.fontSmall', '小'],
+    ['set.fontStandard', '标准'],
+    ['set.fontLarge', '大'],
+    ['set.fontXl', '特大'],
+    ['set.fontApply', '应用'],
+    ['set.fontPreview', '教案、课件与家校沟通示例文字'],
+    ['toast.fontApplied', '字号已应用'],
+    ['err.fontUnsupported', '当前设备暂不支持调整字号']
   ]);
 
   private static readonly en: Map<string, string> = new Map<string, string>([
@@ -556,7 +566,17 @@ export class I18n {
     ['set.duoAuto', 'Automatic'],
     ['set.duoOn', 'Always bottom half'],
     ['set.duoOff', 'Off (tablet style)'],
-    ['set.duoHint', 'Layout saved, switching now']
+    ['set.duoHint', 'Layout saved, switching now'],
+    ['set.fontScale', 'Font Size'],
+    ['set.fontDesc', 'Adjust the text size of content and UI; tap Apply to take effect across the app'],
+    ['set.fontSmall', 'Small'],
+    ['set.fontStandard', 'Standard'],
+    ['set.fontLarge', 'Large'],
+    ['set.fontXl', 'Extra large'],
+    ['set.fontApply', 'Apply'],
+    ['set.fontPreview', 'Sample: lesson plans, slides and parent messages'],
+    ['toast.fontApplied', 'Font size applied'],
+    ['err.fontUnsupported', 'Font size adjustment is not supported on this device']
   ]);
 
   /** 读取当前语言：'zh' | 'en' | 'ug' | 'bo' | 'mn'（默认 zh） */

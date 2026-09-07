@@ -22,6 +22,10 @@ export struct SettingsContent {
   @StorageLink('autoSaveHist') autoSave: boolean = true;
   /** 2in1 结果分屏布局：auto=自动 / on=总是下半屏 / off=关闭 */
   @StorageLink('duoLayout') duoLayout: string = 'auto';
+  /** 应用内字号倍率（作用于全部 fp 文字） */
+  @StorageLink('fontScale') fontScale: number = 1.0;
+  /** 字号档位选中下标（0..3，对应 AppSettings.FONT_PRESETS） */
+  @State selFontIdx: number = 1;
 
   private t(key: string): string {
     void this.appLang;
@@ -36,6 +40,7 @@ export struct SettingsContent {
   /** 进入设置页即确保内置字体已注册（进程内仅一次），避免切换语言后文字空白 */
   aboutToAppear(): void {
     this.ensureFonts();
+    this.selFontIdx = this.fontPresetIndex();
   }
 
   private ensureFonts(): void {
@@ -163,6 +168,52 @@ export struct SettingsContent {
     });
   }
 
+  /** 当前已应用字号在档位中的下标（未命中默认"标准"档） */
+  private fontPresetIndex(): number {
+    const presets: number[] = AppSettings.FONT_PRESETS;
+    for (let i = 0; i < presets.length; i++) {
+      if (Math.abs(presets[i] - this.fontScale) < 0.001) {
+        return i;
+      }
+    }
+    return 1;
+  }
+
+  /** 字号档位标签（与 AppSettings.FONT_PRESETS 顺序一致） */
+  private fontLabel(idx: number): string {
+    if (idx === 0) {
+      return this.t('set.fontSmall');
+    }
+    if (idx === 2) {
+      return this.t('set.fontLarge');
+    }
+    if (idx === 3) {
+      return this.t('set.fontXl');
+    }
+    return this.t('set.fontStandard');
+  }
+
+  /** 点击"应用"：持久化并全局应用所选字号倍率 */
+  private applyFontSize(): void {
+    const presets: number[] = AppSettings.FONT_PRESETS;
+    const ctx = getContext(this) as common.UIAbilityContext;
+    AppSettings.saveFontScale(ctx, presets[this.selFontIdx]).then((ok: boolean) => {
+      promptAction.showToast({
+        message: ok ? I18n.t('toast.fontApplied') : I18n.t('err.fontUnsupported')
+      });
+    });
+  }
+
+  /**
+   * 预览字号换算：在当前"已应用倍率"下渲染出"目标档位"的绝对视觉效果
+   * （页面文字本身也随已应用倍率缩放，故需按 cur/target 反向折算字号值）
+   */
+  private previewSize(base: number): number {
+    const cur: number = this.fontScale > 0 ? this.fontScale : 1.0;
+    const target: number = AppSettings.FONT_PRESETS[this.selFontIdx];
+    return Math.round(base * (target / cur) * 100) / 100;
+  }
+
   /** 打开系统浏览器访问开源仓库，鼓励用户点亮 Star */
   private openRepo(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
@@ -225,6 +276,81 @@ export struct SettingsContent {
                 const themes: string[] = ['light', 'dark', 'system'];
                 this.switchTheme(themes[index]);
               })
+          }
+          .width('100%')
+          .padding(16)
+          .backgroundColor(this.col('card'))
+          .borderRadius(14)
+          .alignItems(HorizontalAlign.Start)
+
+          // 字号大小（选择档位 + 预览，点"应用"全局生效）
+          Column({ space: 12 }) {
+            Column({ space: 4 }) {
+              Text(this.t('set.fontScale'))
+                .fontFamily(AppFonts.family())
+                .fontSize(15)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.col('title'))
+                .width('100%')
+              Text(this.t('set.fontDesc'))
+                .fontFamily(AppFonts.family())
+                .fontSize(12)
+                .fontColor(this.col('hint'))
+                .lineHeight(18)
+                .width('100%')
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            // 档位选择（小 / 标准 / 大 / 特大）
+            Row({ space: 8 }) {
+              ForEach([0, 1, 2, 3], (idx: number) => {
+                Button(this.fontLabel(idx))
+                  .fontFamily(AppFonts.family())
+                  .fontSize(13)
+                  .height(38)
+                  .layoutWeight(1)
+                  .backgroundColor(this.selFontIdx === idx ? '#4A90D9' : this.col('inputBg'))
+                  .fontColor(this.selFontIdx === idx ? '#FFFFFF' : this.col('text'))
+                  .onClick(() => {
+                    this.selFontIdx = idx;
+                  })
+              }, (idx: number) => idx.toString())
+            }
+            .width('100%')
+            // 预览（随所选档位即时变化）
+            Column({ space: 6 }) {
+              Text('Aa')
+                .fontFamily(AppFonts.family())
+                .fontSize(this.previewSize(26))
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.col('title'))
+                .width('100%')
+              Text(this.t('set.fontPreview'))
+                .fontFamily(AppFonts.family())
+                .fontSize(this.previewSize(15))
+                .fontColor(this.col('text'))
+                .lineHeight(this.previewSize(22))
+                .width('100%')
+            }
+            .width('100%')
+            .padding(14)
+            .backgroundColor(this.col('inputBg'))
+            .borderRadius(12)
+            .alignItems(HorizontalAlign.Start)
+            // 应用
+            Row() {
+              Blank()
+              Button(this.t('set.fontApply'))
+                .fontFamily(AppFonts.family())
+                .fontSize(14)
+                .height(38)
+                .width(104)
+                .backgroundColor('#4A90D9')
+                .onClick(() => {
+                  this.applyFontSize();
+                })
+            }
+            .width('100%')
           }
           .width('100%')
           .padding(16)
