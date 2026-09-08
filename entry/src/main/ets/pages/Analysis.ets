@@ -6,6 +6,7 @@
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
 import { AiService } from '../common/AiService';
+import { GenSession, GenSessionState } from '../common/GenSession';
 import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
@@ -23,6 +24,43 @@ export struct AnalysisContent {
   @State previewRows: string[][] = [];
   @State loading: boolean = false;
   @State result: string = '';
+  /** 生成会话恢复（离开页面后重进仍显示生成中/结果） */
+  private sessSub: number = -1;
+
+  private resumeGenSession(): void {
+    const cur: GenSessionState | undefined = GenSession.stateOf(this.genKey());
+    if (cur !== undefined) {
+      if (cur.phase === 'busy' && this.result === '') {
+        this.loading = true;
+      } else if (cur.phase === 'done' && this.result === '') {
+        this.result = cur.text;
+        this.loading = false;
+      }
+    }
+    this.sessSub = GenSession.subscribe(this.genKey(), (s: GenSessionState): void => {
+      if (s.phase === 'busy') {
+        if (this.result === '') {
+          this.loading = true;
+        }
+      } else if (s.phase === 'done') {
+        this.result = s.text;
+        this.loading = false;
+      } else {
+        this.loading = false;
+      }
+    });
+  }
+
+  private leaveGenSession(): void {
+    if (this.sessSub >= 0) {
+      GenSession.unsubscribe(this.genKey(), this.sessSub);
+      this.sessSub = -1;
+    }
+  }
+
+  private genKey(): string {
+    return 'analysis';
+  }
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
   /** 2in1 独立页面（IndexWideDuo 下半屏）渲染时由壳传入 true：本组件不内嵌结果区 */
@@ -45,6 +83,11 @@ export struct AnalysisContent {
 
   aboutToAppear(): void {
     this.refreshPreview();
+    this.resumeGenSession();
+  }
+
+  aboutToDisappear(): void {
+    this.leaveGenSession();
   }
 
   /** 导入 .xlsx 文件 */

@@ -8,6 +8,7 @@
 import pasteboard from '@ohos.pasteboard';
 import promptAction from '@ohos.promptAction';
 import common from '@ohos.app.ability.common';
+import window from '@ohos.window';
 import { I18n } from '../I18n';
 import { AppTheme } from '../AppTheme';
 import { AppFonts } from '../AppFonts';
@@ -44,6 +45,13 @@ export struct ResultPanel {
   @State editorReady: boolean = false;
   /** 当前选中区（-1 表示无选区） */
   @State hasSelection: boolean = false;
+  /** 顶部系统栏高度（vp）：全屏编辑内容需下移避开时间栏 */
+  @State topInset: number = 0;
+  /** 退出确认层：0=无 1=保存并退出 2=放弃并退出（自绘于编辑页内，避免系统弹窗叠加全屏覆盖崩溃） */
+  @State confirmMode: number = 0;
+  /** 确认倒计时（秒），为 0 后可点确认 */
+  @State confirmRemain: number = 0;
+  private confirmTimer: number = -1;
 
   /** 富文本控制器（每次进入编辑态重建，避免重复装载） */
   private rc: RichEditorController = new RichEditorController();
@@ -146,6 +154,7 @@ export struct ResultPanel {
     this.showColors = false;
     this.selStart = -1;
     this.selEnd = -1;
+    this.refreshTopInset();
     this.editing = true;
   }
 
@@ -337,8 +346,80 @@ export struct ResultPanel {
     }
   }
 
-  // ============ 编辑态：退出/保存 ============
+  // ============ 编辑态：退出确认（页面内自绘层）与全屏避让 ============
 
+  /** 读取系统状态栏高度（vp）：全屏编辑内容下移，避免时间栏遮挡完成/关闭 */
+  private refreshTopInset(): void {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      window.getLastWindow(ctx).then((w: window.Window): void => {
+        try {
+          const area = w.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+          const px: number = area.topRect.height;
+          this.topInset = px > 0 ? px2vp(px) : 0;
+        } catch (e) {
+          this.topInset = 0;
+        }
+      }).catch(() => {
+        this.topInset = 0;
+      });
+    } catch (e) {
+      this.topInset = 0;
+    }
+  }
+
+  /** 点击"完成"：显示"保存并退出？"确认层（确认按钮 1 秒后可用） */
+  private askSaveExit(): void {
+    this.confirmMode = 1;
+    this.confirmRemain = 1;
+    this.startConfirmTick();
+  }
+
+  /** 点击"关闭"：显示"放弃并退出？"确认层（确认按钮 2 秒后可用） */
+  private askDiscardExit(): void {
+    this.confirmMode = 2;
+    this.confirmRemain = 2;
+    this.startConfirmTick();
+  }
+
+  private startConfirmTick(): void {
+    this.stopConfirmTick();
+    this.confirmTimer = setInterval(() => {
+      if (this.confirmRemain > 0) {
+        this.confirmRemain--;
+      }
+      if (this.confirmRemain <= 0) {
+        this.stopConfirmTick();
+      }
+    }, 1000);
+  }
+
+  private stopConfirmTick(): void {
+    if (this.confirmTimer !== -1) {
+      clearInterval(this.confirmTimer);
+      this.confirmTimer = -1;
+    }
+  }
+
+  /** 取消：仅关闭确认层，返回编辑 */
+  private cancelConfirm(): void {
+    this.stopConfirmTick();
+    this.confirmMode = 0;
+  }
+
+  /** 确认：按当前模式执行"保存并退出"或"放弃并退出" */
+  private applyConfirm(): void {
+    const mode: number = this.confirmMode;
+    this.stopConfirmTick();
+    this.confirmMode = 0;
+    if (mode === 1) {
+      this.doneEdit();
+    } else if (mode === 2) {
+      this.cancelEdit();
+    }
+  }
+
+  /** 确认保存并退出：回写富文本并关闭编辑 */
   private doneEdit(): void {
     this.onEdited(this.readHtml());
     this.editing = false;
@@ -388,7 +469,8 @@ export struct ResultPanel {
   /** 编辑态整屏视图（作为全屏内容覆盖层展示） */
   @Builder
   editorView() {
-    Column({ space: 8 }) {
+    Stack() {
+      Column({ space: 8 }) {
       // 顶栏：关闭 + 标题 + 完成
       Row() {
         Text(this.t('btn.close'))
@@ -397,7 +479,7 @@ export struct ResultPanel {
           .fontColor(this.col('hint'))
           .padding({ left: 4, right: 10, top: 6, bottom: 6 })
           .onClick(() => {
-            this.cancelEdit();
+            this.askDiscardExit();
           })
         Text(this.t('editor.title'))
           .fontFamily(AppFonts.family())
@@ -414,7 +496,7 @@ export struct ResultPanel {
           .fontColor('#4A90D9')
           .padding({ left: 10, right: 4, top: 6, bottom: 6 })
           .onClick(() => {
-            this.doneEdit();
+            this.askSaveExit();
           })
       }
       .width('100%')
@@ -522,7 +604,86 @@ export struct ResultPanel {
     }
     .width('100%')
     .height('100%')
-    .padding({ left: 12, right: 12, top: 4, bottom: 12 })
+    // 顶部按系统状态栏高度下移，避免时间栏遮挡"关闭/完成"
+    .padding({ left: 12, right: 12, top: this.topInset + 4, bottom: 12 })
+
+    // 退出确认层：页面内自绘，避免系统弹窗叠加全屏覆盖导致崩溃/杀进程
+    if (this.confirmMode > 0) {
+      this.confirmOverlay()
+    }
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 退出确认文案（按模式取标题/说明/确认按钮文字） */
+  private confirmTitleText(): string {
+    return this.confirmMode === 1 ? this.t('editor.saveExitTitle') : this.t('editor.discardTitle');
+  }
+
+  private confirmMessageText(): string {
+    return this.confirmMode === 1 ? this.t('editor.saveExitMsg') : this.t('editor.discardMsg');
+  }
+
+  private confirmApplyLabel(): string {
+    return this.confirmMode === 1 ? this.t('btn.done') : this.t('btn.close');
+  }
+
+  /** 退出确认层（页面内自绘，确认按钮带倒计时防误触） */
+  @Builder
+  confirmOverlay() {
+    Column() {
+      Column({ space: 14 }) {
+        Text(this.confirmTitleText())
+          .fontFamily(AppFonts.family())
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.col('title'))
+          .width('100%')
+        Text(this.confirmMessageText())
+          .fontFamily(AppFonts.family())
+          .fontSize(14)
+          .fontColor(this.col('text'))
+          .lineHeight(21)
+          .width('100%')
+        Row({ space: 12 }) {
+          Button(this.t('editor.cancel'))
+            .fontFamily(AppFonts.family())
+            .fontSize(15)
+            .height(40)
+            .layoutWeight(1)
+            .backgroundColor(this.col('inputBg'))
+            .fontColor(this.col('text'))
+            .onClick(() => {
+              this.cancelConfirm();
+            })
+          Button(this.confirmApplyLabel() + (this.confirmRemain > 0 ? '（' + this.confirmRemain + 's）' : ''))
+            .fontFamily(AppFonts.family())
+            .fontSize(15)
+            .height(40)
+            .layoutWeight(1)
+            .backgroundColor('#4A90D9')
+            .fontColor(Color.White)
+            .enabled(this.confirmRemain <= 0)
+            .opacity(this.confirmRemain <= 0 ? 1 : 0.5)
+            .onClick(() => {
+              if (this.confirmRemain <= 0) {
+                this.applyConfirm();
+              }
+            })
+        }
+        .width('100%')
+      }
+      .width('86%')
+      .padding(20)
+      .backgroundColor(this.col('card'))
+      .borderRadius(16)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('rgba(0,0,0,0.38)')
   }
 
   /** 只读预览视图 */

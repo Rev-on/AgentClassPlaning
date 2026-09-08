@@ -4,6 +4,7 @@
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
 import { AiService } from '../common/AiService';
+import { GenSession, GenSessionState } from '../common/GenSession';
 import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
@@ -19,6 +20,43 @@ export struct ResearchContent {
   @State remark: string = '';
   @State loading: boolean = false;
   @State result: string = '';
+  /** 生成会话恢复（离开页面后重进仍显示生成中/结果） */
+  private sessSub: number = -1;
+
+  private resumeGenSession(): void {
+    const cur: GenSessionState | undefined = GenSession.stateOf(this.genKey());
+    if (cur !== undefined) {
+      if (cur.phase === 'busy' && this.result === '') {
+        this.loading = true;
+      } else if (cur.phase === 'done' && this.result === '') {
+        this.result = cur.text;
+        this.loading = false;
+      }
+    }
+    this.sessSub = GenSession.subscribe(this.genKey(), (s: GenSessionState): void => {
+      if (s.phase === 'busy') {
+        if (this.result === '') {
+          this.loading = true;
+        }
+      } else if (s.phase === 'done') {
+        this.result = s.text;
+        this.loading = false;
+      } else {
+        this.loading = false;
+      }
+    });
+  }
+
+  private leaveGenSession(): void {
+    if (this.sessSub >= 0) {
+      GenSession.unsubscribe(this.genKey(), this.sessSub);
+      this.sessSub = -1;
+    }
+  }
+
+  private genKey(): string {
+    return 'research';
+  }
   /** 底部水印闪烁 */
   @State blink: boolean = false;
   @StorageProp('appLang') appLang: string = 'zh';
@@ -28,12 +66,14 @@ export struct ResearchContent {
   private blinkTimer: number = -1;
 
   aboutToAppear(): void {
+    this.resumeGenSession();
     this.blinkTimer = setInterval(() => {
       this.blink = !this.blink;
     }, 650);
   }
 
   aboutToDisappear(): void {
+    this.leaveGenSession();
     if (this.blinkTimer !== -1) {
       clearInterval(this.blinkTimer);
       this.blinkTimer = -1;

@@ -10,6 +10,7 @@ import { ApiConfig } from './ApiConfig';
 import { GenTask } from './GenTask';
 import { HistoryStore } from './HistoryStore';
 import { ResultBus } from './ResultBus';
+import { GenSession } from './GenSession';
 
 /** 对话消息 */
 interface ChatMessage {
@@ -85,6 +86,26 @@ export class AiService {
     if (duoBus && opts !== undefined) {
       ResultBus.live(opts.type, opts.label, opts.label, '');
     }
+    // 生成会话入栈：生成进度与页面生命周期解耦（左滑退出/上滑回桌面不打断，重进页面可恢复）
+    const sessKey = (): string => {
+      return opts !== undefined && opts.type !== '' ? opts.type : '';
+    };
+    const sessEnd = (text: string): void => {
+      const k: string = sessKey();
+      if (k !== '') {
+        GenSession.end(k, text);
+      }
+    };
+    const sessClear = (): void => {
+      const k: string = sessKey();
+      if (k !== '') {
+        GenSession.clear(k);
+      }
+    };
+    const sessKeyValue: string = sessKey();
+    if (sessKeyValue !== '') {
+      GenSession.begin(sessKeyValue);
+    }
     try {
       if (opts !== undefined && opts.ctx !== undefined) {
         // 任务已提交成功的标志：一旦服务端接受任务，后续任务态失败/超时不再回退直连重发
@@ -93,6 +114,7 @@ export class AiService {
         try {
           const byTask: string = await AiService.chatByTask(systemPrompt, userPrompt, skipNote, onDelta, opts, ctl);
           AiService.mirrorDone(duoBus, opts, byTask);
+          sessEnd(byTask);
           return byTask;
         } catch (e) {
           if (ctl.accepted) {
@@ -113,6 +135,7 @@ export class AiService {
           if (opts !== undefined) {
             AiService.mirrorDone(duoBus, opts, out);
           }
+          sessEnd(out);
           return out;
         } catch (e) {
           lastErr = e instanceof Error ? e : new Error('AI 请求失败，请稍后重试');
@@ -120,6 +143,7 @@ export class AiService {
       }
       throw lastErr;
     } catch (e) {
+      sessClear();
       if (duoBus) {
         // 生成失败：下屏结果面板复位为空态，避免停留在"生成中"
         ResultBus.clear();
