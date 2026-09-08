@@ -3,6 +3,7 @@
  */
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
+import router from '@ohos.router';
 import { AiService } from '../common/AiService';
 import { GenSession, GenSessionState } from '../common/GenSession';
 import { Prompts } from '../common/Prompts';
@@ -109,6 +110,19 @@ export struct PlanContent {
     }
   }
 
+  /** 跳转课件大纲页，并把刚生成的教案富文本作为导入内容传递过去 */
+  private jumpToCourseware(): void {
+    if (this.result === '') {
+      return;
+    }
+    router.pushUrl({
+      url: 'pages/Courseware',
+      params: { planText: this.result }
+    }).catch((err: Error) => {
+      promptAction.showToast({ message: I18n.t('err.jumpFail') + ' ' + err.message });
+    });
+  }
+
   /** 自动保存到历史（开关开启且内容非空时静默保存；content 用于页面已离开时的兜底） */
   private autoSaveHistory(content?: string): void {
     const text: string = content !== undefined && content !== '' ? content : this.result;
@@ -205,15 +219,40 @@ export struct PlanContent {
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
 
-        Button(this.loading ? this.t('gen.loading') : this.t('act.plan'))
-          .fontFamily(AppFonts.family())
+        if (!this.loading && this.result !== '') {
+          // 生成完成：主按钮切换为"重新生成"与"跳转至课件大纲生成"
+          Row({ space: 10 }) {
+            Button(this.t('act.regen'))
+              .fontFamily(AppFonts.family())
+              .fontSize(15)
+              .height(44)
+              .layoutWeight(1)
+              .backgroundColor('#4A90D9')
+              .onClick(() => {
+                this.generate();
+              })
+            Button(this.t('act.toCourseware'))
+              .fontFamily(AppFonts.family())
+              .fontSize(15)
+              .height(44)
+              .layoutWeight(1)
+              .backgroundColor('#F0A93F')
+              .onClick(() => {
+                this.jumpToCourseware();
+              })
+          }
           .width('100%')
-          .height(44)
-          .backgroundColor(this.loading ? '#9DB8D9' : '#4A90D9')
-          .enabled(!this.loading)
-          .onClick(() => {
-            this.generate();
-          })
+        } else {
+          Button(this.loading ? this.t('gen.loading') : this.t('act.plan'))
+            .fontFamily(AppFonts.family())
+            .width('100%')
+            .height(44)
+            .backgroundColor(this.loading ? '#9DB8D9' : '#4A90D9')
+            .enabled(!this.loading)
+            .onClick(() => {
+              this.generate();
+            })
+        }
       }
       .width('100%')
       .padding(16)

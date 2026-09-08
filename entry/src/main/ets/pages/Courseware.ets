@@ -3,6 +3,7 @@
  */
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
+import router from '@ohos.router';
 import { AiService } from '../common/AiService';
 import { GenSession, GenSessionState } from '../common/GenSession';
 import { Prompts } from '../common/Prompts';
@@ -13,6 +14,11 @@ import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 
+/** 从教案页跳转携带的路由参数 */
+interface PlanImportParams {
+  planText?: string;
+}
+
 @Component
 export struct CoursewareContent {
   @State subject: string = I18n.t('def.subject');
@@ -22,10 +28,23 @@ export struct CoursewareContent {
   @State remark: string = '';
   @State loading: boolean = false;
   @State result: string = '';
+  /** 从教案页导入：非空表示处于"教案导入"模式（隐藏输入框，直接基于教案生成） */
+  @State importedPlan: string = '';
+  @State importMode: boolean = false;
   /** 生成会话恢复（离开页面后重进仍显示生成中/结果） */
   private sessSub: number = -1;
 
   aboutToAppear(): void {
+    // 教案页跳转导入：读取路由参数进入"教案导入"模式（普通入口无参数时为空对象，必须判空）
+    const rawParams = router.getParams();
+    if (rawParams !== undefined && rawParams !== null) {
+      const pr = rawParams as PlanImportParams;
+      if (pr.planText !== undefined && pr.planText !== '') {
+        this.importedPlan = pr.planText;
+        this.importMode = true;
+        this.topic = I18n.currentLang() === 'en' ? 'Imported Plan' : '教案导入';
+      }
+    }
     this.resumeGenSession();
   }
 
@@ -35,7 +54,7 @@ export struct CoursewareContent {
 
   private resumeGenSession(): void {
     const cur: GenSessionState | undefined = GenSession.stateOf(this.genKey());
-    if (cur !== undefined) {
+    if (cur !== undefined && !this.importMode) {
       if (cur.phase === 'busy' && this.result === '') {
         this.loading = true;
       } else if (cur.phase === 'done' && this.result === '') {
@@ -111,14 +130,22 @@ export struct CoursewareContent {
   }
 
   async generate(): Promise<void> {
-    if (this.topic.trim() === '') {
+    const importText: string = this.importMode ? this.importedPlan : '';
+    if (!this.importMode && this.topic.trim() === '') {
       promptAction.showToast({ message: this.t('err.noTopic') });
       return;
     }
     this.loading = true;
     this.result = '';
-    const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
-    const user: string = `学科：${this.subject}\n年级：${this.grade}\n课题：${this.topic}\n课型/用途：${this.usage}\n\n请生成该课题的逐页课件大纲（JSON 格式）。${remarkPart}`;
+    let user: string = '';
+    if (importText !== '') {
+      // 教案导入模式：直接基于已生成的教案内容生成配套课件大纲
+      user = '以下是一份已经生成并通过审阅的完整教案：\n' + importText +
+        '\n\n请基于该教案的课题、结构重难点与教学环节，生成配套的逐页课件大纲（严格 JSON 格式，字段与页面顺序同常规课件大纲要求）。';
+    } else {
+      const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
+      user = `学科：${this.subject}\n年级：${this.grade}\n课题：${this.topic}\n课型/用途：${this.usage}\n\n请生成该课题的逐页课件大纲（JSON 格式）。${remarkPart}`;
+    }
     try {
       const content: string = await AiService.chat(Prompts.coursewareSystem(), user, (partial: string) => {
         this.result = partial;
@@ -177,6 +204,8 @@ export struct CoursewareContent {
       PageHeader({ title: this.t('page.courseware') })
 
       Column({ space: 10 }) {
+        // 教案导入模式：隐藏全部原有输入框（学科/年级/课题/课型/备注），只保留生成按钮与提示
+        if (!this.importMode) {
         Row({ space: 10 }) {
           Text(this.t('label.subject')).fontSize(15).fontColor(this.col('title')).width(86)
             .fontFamily(AppFonts.family())
@@ -228,6 +257,7 @@ export struct CoursewareContent {
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
+        }
 
         Button(this.loading ? this.t('gen.loading') : this.t('act.courseware'))
           .fontFamily(AppFonts.family())
@@ -238,6 +268,16 @@ export struct CoursewareContent {
           .onClick(() => {
             this.generate();
           })
+        if (this.importMode) {
+          // 教案导入模式：生成按钮下方绿字提示
+          Text(this.t('import.planImported'))
+            .fontFamily(AppFonts.family())
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#2E9E63')
+            .width('100%')
+            .padding({ top: 2 })
+        }
         Text(this.t('hint.coursewareJson'))
           .fontFamily(AppFonts.family())
           .fontSize(11)
@@ -263,7 +303,8 @@ export struct CoursewareContent {
           result: this.result,
           type: I18n.t('page.courseware'),
           title: I18n.t('page.courseware') + '-' + this.topic,
-          exportMode: 'json',
+          exportMode: 'pptx',
+          slideMode: true,
           onSave: () => this.saveToHistory(),
           onEdited: (t: string): void => {
             this.result = t;

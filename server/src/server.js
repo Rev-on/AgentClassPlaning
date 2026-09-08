@@ -38,7 +38,7 @@ const UPSTREAM = process.env.UPSTREAM_URL || 'https://api.deepseek.com/chat/comp
 const MODEL = process.env.MODEL || 'deepseek-v4-flash';
 const API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const PROXY_TOKEN = process.env.PROXY_TOKEN || '';
-const TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 150000);
+const TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 600000);
 const RATE_PER_MIN = Number(process.env.RATE_LIMIT_PER_MIN || 120);
 
 const app = express();

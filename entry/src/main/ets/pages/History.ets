@@ -113,11 +113,125 @@ struct HistoryDetailDialog {
   }
 }
 
+/** 批量删除确认框：取消=白底按钮，删除=红色按钮；删除键需等待 2 秒后才可点击 */
+@CustomDialog
+struct DeleteHistoryDialog {
+  controller: CustomDialogController = new CustomDialogController({ builder: undefined });
+  @Link title: string;
+  @Link message: string;
+  /** 确认回调 */
+  onConfirm: () => void = () => {
+  };
+  @State remain: number = 0;
+  @StorageProp('appLang') appLang: string = 'zh';
+  @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
+  private tickTimer: number = -1;
+
+  aboutToAppear(): void {
+    this.remain = 2;
+    if (this.tickTimer === -1) {
+      this.tickTimer = setInterval(() => {
+        if (this.remain > 0) {
+          this.remain--;
+        }
+        if (this.remain <= 0 && this.tickTimer !== -1) {
+          clearInterval(this.tickTimer);
+          this.tickTimer = -1;
+        }
+      }, 1000);
+    }
+  }
+
+  aboutToDisappear(): void {
+    if (this.tickTimer !== -1) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = -1;
+    }
+  }
+
+  private t(key: string): string {
+    void this.appLang;
+    return I18n.t(key);
+  }
+
+  private col(key: string): string {
+    void this.resolvedTheme;
+    return AppTheme.color(key, this.resolvedTheme);
+  }
+
+  private stopTick(): void {
+    if (this.tickTimer !== -1) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = -1;
+    }
+  }
+
+  build() {
+    Column({ space: 14 }) {
+      Text(this.title)
+        .fontFamily(AppFonts.family())
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.col('title'))
+        .width('100%')
+      Text(this.message)
+        .fontFamily(AppFonts.family())
+        .fontSize(14)
+        .fontColor(this.col('text'))
+        .lineHeight(21)
+        .width('100%')
+      Row({ space: 12 }) {
+        Button(this.t('btn.cancel'))
+          .fontFamily(AppFonts.family())
+          .fontSize(15)
+          .height(40)
+          .layoutWeight(1)
+          .backgroundColor('#FFFFFF')
+          .fontColor('#1B1B1F')
+          .border({ width: 1, color: '#E3E6EB' })
+          .onClick(() => {
+            this.stopTick();
+            this.controller.close();
+          })
+        Button(this.t('btn.delete') + (this.remain > 0 ? '（' + this.remain + 's）' : ''))
+          .fontFamily(AppFonts.family())
+          .fontSize(15)
+          .height(40)
+          .layoutWeight(1)
+          .backgroundColor('#DC2626')
+          .fontColor(Color.White)
+          .enabled(this.remain <= 0)
+          .opacity(this.remain <= 0 ? 1 : 0.5)
+          .onClick(() => {
+            if (this.remain > 0) {
+              return;
+            }
+            this.stopTick();
+            this.controller.close();
+            this.onConfirm();
+          })
+      }
+      .width('100%')
+    }
+    .width('86%')
+    .padding(20)
+    .backgroundColor(this.col('card'))
+    .borderRadius(16)
+    .alignItems(HorizontalAlign.Start)
+  }
+}
+
 @Component
 export struct HistoryContent {
   @State records: HistoryRecord[] = [];
   @State dialogTitle: string = '';
   @State dialogContent: string = '';
+  /** 多选删除状态 */
+  @State multi: boolean = false;
+  @State picked: Set<string> = new Set<string>();
+  @State delDlgTitle: string = '';
+  @State delDlgMsg: string = '';
+  private delDlg: CustomDialogController | null = null;
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
   private dialogController: CustomDialogController =
@@ -141,6 +255,16 @@ export struct HistoryContent {
 
   aboutToAppear(): void {
     this.loadRecords();
+    this.delDlg = new CustomDialogController({
+      builder: DeleteHistoryDialog({
+        title: $delDlgTitle,
+        message: $delDlgMsg,
+        onConfirm: (): void => {
+          this.doDeleteSelected();
+        }
+      }),
+      autoCancel: true
+    });
   }
 
   /** 页面显示时刷新 */
@@ -152,6 +276,60 @@ export struct HistoryContent {
     const ctx = getContext(this) as common.UIAbilityContext;
     HistoryStore.getRecords(ctx).then((list: HistoryRecord[]) => {
       this.records = list;
+    });
+  }
+
+  // ============ 长按多选与批量删除 ============
+
+  /** 长按进入多选并选中该条 */
+  private enterMulti(record: HistoryRecord): void {
+    this.multi = true;
+    const s: Set<string> = new Set<string>();
+    s.add(HistoryStore.keyOf(record));
+    this.picked = s;
+  }
+
+  /** 多选模式下点按切换选中 */
+  private togglePick(key: string): void {
+    const s: Set<string> = new Set<string>(this.picked);
+    if (s.has(key)) {
+      s.delete(key);
+    } else {
+      s.add(key);
+    }
+    this.picked = s;
+  }
+
+  /** 退出多选 */
+  private exitMulti(): void {
+    this.multi = false;
+    this.picked = new Set<string>();
+  }
+
+  /** 点击删除：弹红色确认框（2 秒后可确认） */
+  private openDeleteSelected(): void {
+    if (this.picked.size === 0) {
+      promptAction.showToast({ message: I18n.t('hist.chooseHint') });
+      return;
+    }
+    this.delDlgTitle = I18n.t('hist.delTitle');
+    this.delDlgMsg = I18n.t('hist.delMsg').replace('{n}', this.picked.size.toString());
+    if (this.delDlg !== null) {
+      this.delDlg.open();
+    }
+  }
+
+  /** 确认删除所选记录 */
+  private doDeleteSelected(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const keys: string[] = [];
+    this.picked.forEach((k: string) => {
+      keys.push(k);
+    });
+    this.exitMulti();
+    HistoryStore.removeRecords(ctx, keys).then(() => {
+      this.loadRecords();
+      promptAction.showToast({ message: I18n.t('toast.delDone') });
     });
   }
 
@@ -175,33 +353,63 @@ export struct HistoryContent {
     Column({ space: 10 }) {
       PageHeader({ title: this.t('hist.title') })
 
-      Row() {
-        Text(this.t('hist.count').replace('{n}', this.records.length.toString()))
-          .fontFamily(AppFonts.family())
-          .fontSize(13)
-          .fontColor(this.col('sub'))
-        Blank()
-        Button(this.t('btn.clear'))
-          .fontFamily(AppFonts.family())
-          .fontSize(13)
-          .height(30)
-          .backgroundColor(this.col('headBg'))
-          .fontColor(this.col('sub'))
-          .onClick(() => {
-            AlertDialog.show({
-              title: this.t('hist.clearTitle'),
-              message: this.t('hist.clearMsg'),
-              primaryButton: {
-                value: this.t('btn.close'), action: () => {}
-              },
-              secondaryButton: {
-                value: this.t('btn.clear'), fontColor: '#DC2626',
-                action: () => this.clearAll()
-              }
-            });
-          })
+      if (this.multi) {
+        Row({ space: 10 }) {
+          Text(this.t('hist.multiTitle').replace('{n}', this.picked.size.toString()))
+            .fontFamily(AppFonts.family())
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.col('title'))
+            .layoutWeight(1)
+          Button(this.t('btn.cancel'))
+            .fontFamily(AppFonts.family())
+            .fontSize(13)
+            .height(30)
+            .backgroundColor(this.col('headBg'))
+            .fontColor(this.col('sub'))
+            .onClick(() => {
+              this.exitMulti();
+            })
+          Button(this.t('btn.delete'))
+            .fontFamily(AppFonts.family())
+            .fontSize(13)
+            .height(30)
+            .backgroundColor('#DC2626')
+            .fontColor(Color.White)
+            .onClick(() => {
+              this.openDeleteSelected();
+            })
+        }
+        .width('100%')
+      } else {
+        Row() {
+          Text(this.t('hist.count').replace('{n}', this.records.length.toString()))
+            .fontFamily(AppFonts.family())
+            .fontSize(13)
+            .fontColor(this.col('sub'))
+          Blank()
+          Button(this.t('btn.clear'))
+            .fontFamily(AppFonts.family())
+            .fontSize(13)
+            .height(30)
+            .backgroundColor(this.col('headBg'))
+            .fontColor(this.col('sub'))
+            .onClick(() => {
+              AlertDialog.show({
+                title: this.t('hist.clearTitle'),
+                message: this.t('hist.clearMsg'),
+                primaryButton: {
+                  value: this.t('btn.close'), action: () => {}
+                },
+                secondaryButton: {
+                  value: this.t('btn.clear'), fontColor: '#DC2626',
+                  action: () => this.clearAll()
+                }
+              });
+            })
+        }
+        .width('100%')
       }
-      .width('100%')
 
       if (this.records.length === 0) {
         Column({ space: 8 }) {
@@ -244,17 +452,47 @@ export struct HistoryContent {
                 }
                 .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
-                Text(this.t('hist.view'))
-                  .fontFamily(AppFonts.family())
-                  .fontSize(13)
-                  .fontColor('#4A90D9')
+                if (this.multi) {
+                  Column() {
+                    Text(this.picked.has(HistoryStore.keyOf(record)) ? '✓' : '')
+                      .fontFamily(AppFonts.family())
+                      .fontSize(14)
+                      .fontColor(Color.White)
+                  }
+                  .width(24)
+                  .height(24)
+                  .justifyContent(FlexAlign.Center)
+                  .borderRadius(12)
+                  .backgroundColor(this.picked.has(HistoryStore.keyOf(record)) ? '#4A90D9' : this.col('inputBg'))
+                  .border({ width: this.picked.has(HistoryStore.keyOf(record)) ? 0 : 1, color: '#C9CED6' })
+                } else {
+                  Text(this.t('hist.view'))
+                    .fontFamily(AppFonts.family())
+                    .fontSize(13)
+                    .fontColor('#4A90D9')
+                }
               }
               .width('100%')
               .padding(14)
-              .backgroundColor(this.col('card'))
+              .backgroundColor(this.picked.has(HistoryStore.keyOf(record)) ? this.col('inputBg') : this.col('card'))
               .borderRadius(12)
+              .border({ width: this.picked.has(HistoryStore.keyOf(record)) ? 1.5 : 0, color: '#4A90D9' })
               .shadow({ radius: 6, color: 'rgba(0,0,0,0.05)', offsetY: 2 })
-              .onClick(() => this.showDetail(record))
+              .gesture(
+                LongPressGesture({ repeat: false })
+                  .onAction(() => {
+                    if (!this.multi) {
+                      this.enterMulti(record);
+                    }
+                  })
+              )
+              .onClick(() => {
+                if (this.multi) {
+                  this.togglePick(HistoryStore.keyOf(record));
+                } else {
+                  this.showDetail(record);
+                }
+              })
             }
           }, (record: HistoryRecord) => record.time + record.title)
         }

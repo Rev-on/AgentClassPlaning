@@ -86,8 +86,8 @@ export class GenTask {
   private static readonly DKEY: string = 'ai_device_id';
   /** 轮询间隔（毫秒） */
   static readonly POLL_MS: number = 2000;
-  /** 最大轮询次数（约 10 分钟） */
-  static readonly POLL_MAX: number = 300;
+  /** 最大轮询次数（约 15 分钟，覆盖长教案/课件等大输出） */
+  static readonly POLL_MAX: number = 450;
   private static cachedDev: string = '';
 
   /** 生成通知/请求用 seed（正整数 < 2^31） */

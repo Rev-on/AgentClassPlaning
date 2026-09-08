@@ -74,6 +74,32 @@ export class HistoryStore {
     await store.flush();
   }
 
+  /** 记录唯一键（与列表内使用一致：时间+标题） */
+  static keyOf(record: HistoryRecord): string {
+    return record.time + '||' + record.title;
+  }
+
+  /** 批量删除指定记录（keys 由 keyOf 生成）；不存在则忽略 */
+  static async removeRecords(context: common.UIAbilityContext, keys: string[]): Promise<void> {
+    if (keys.length === 0) {
+      return;
+    }
+    const records = await HistoryStore.getRecords(context);
+    const del = new Set<string>();
+    for (let i: number = 0; i < keys.length; i++) {
+      del.add(keys[i]);
+    }
+    const kept: HistoryRecord[] = [];
+    for (let i: number = 0; i < records.length; i++) {
+      if (!del.has(HistoryStore.keyOf(records[i]))) {
+        kept.push(records[i]);
+      }
+    }
+    const store = await preferences.getPreferences(context, HistoryStore.STORE_NAME);
+    await store.put(HistoryStore.KEY, JSON.stringify(kept));
+    await store.flush();
+  }
+
   /** 当前时间字符串（yyyy-MM-dd HH:mm） */
   static formatNow(): string {
     const d = new Date();
