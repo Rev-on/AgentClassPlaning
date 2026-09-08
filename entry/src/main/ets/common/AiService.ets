@@ -238,17 +238,20 @@ export class AiService {
     throw new Error('AI 生成较慢，请稍后在通知或历史中查看结果');
   }
 
-  /** 在生成内容末尾追加"AI 生成"标注（软件层统一生效，课件 JSON 除外） */
+  /** 在生成内容末尾追加"AI 生成"标注（软件层统一生效，课件 JSON 除外）；内容为富文本 HTML */
   static withAiNote(content: string, skip: boolean): string {
     if (skip || content === '') {
       return content;
     }
     const lang: string | undefined = AppStorage.get<string>('appLang');
-    const tail: string = lang === 'en' ? '(AI-generated, for reference only)' : '（AI生成，仅供参考）';
-    if (content.trim().endsWith(tail)) {
+    const tailPlain: string = lang === 'en' ? '(AI-generated, for reference only)' : '（AI生成，仅供参考）';
+    if (content.indexOf(tailPlain) >= 0) {
       return content;
     }
-    return content + '\n\n' + tail;
+    const tailHtml: string = lang === 'en' ?
+      '<br><br><i>(AI-generated, for reference only)</i>' :
+      '<br><br><i>（AI生成，仅供参考）</i>';
+    return content + tailHtml;
   }
 
   /** 单次请求 */

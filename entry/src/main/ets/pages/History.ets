@@ -10,7 +10,8 @@ import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { DocxExporter } from '../common/DocxExporter';
 import { PageHeader } from '../common/components/PageHeader';
-import { MdView } from '../common/components/MdView';
+import { RichBox } from '../common/components/RichBox';
+import { RichHtml } from '../common/RichHtml';
 
 /** 历史记录详情弹窗 */
 @CustomDialog
@@ -36,7 +37,7 @@ struct HistoryDetailDialog {
       return;
     }
     const sysPaste = pasteboard.getSystemPasteboard();
-    const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.content);
+    const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, RichHtml.toPlain(this.content));
     sysPaste.setData(data).then(() => {
       promptAction.showToast({ message: I18n.t('toast.copied') });
     }).catch(() => {
@@ -70,7 +71,7 @@ struct HistoryDetailDialog {
             .fontSize(14)
             .fontColor(this.col('hint'))
         } else {
-          MdView({ markdown: this.content })
+          RichBox({ html: this.content })
             .width('100%')
         }
       }

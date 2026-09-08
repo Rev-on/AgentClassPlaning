@@ -8,6 +8,7 @@ import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import promptAction from '@ohos.promptAction';
 import JSZip from '@ohos/jszip';
+import { RichHtml, RichRun } from './RichHtml';
 
 /** 块级元素（与渲染组件一致的简化结构） */
 interface DocxBlock {
@@ -20,12 +21,25 @@ interface DocxBlock {
   tableRows?: string[][];
 }
 
+/** 富文本段内带样式片段（Word 导出用） */
+interface DocxSeg {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  color: string;
+  size: number;
+}
+
 export class DocxExporter {
 
-  /** 主入口：导出 Markdown 内容为 .docx（弹出保存位置选择） */
-  static async exportDocx(context: common.UIAbilityContext, markdown: string, fileName: string): Promise<void> {
-    // 1. Markdown → document.xml
-    const documentXml: string = DocxExporter.buildDocumentXml(markdown);
+  /** 主入口：导出内容为 .docx（弹出保存位置选择）。富文本 HTML 走样式转换；遗留 Markdown 走原解析 */
+  static async exportDocx(context: common.UIAbilityContext, content: string, fileName: string): Promise<void> {
+    // 1. 内容 → document.xml
+    const documentXml: string = DocxExporter.isHtmlDoc(content) ?
+      DocxExporter.buildHtmlDocumentXml(content) :
+      DocxExporter.buildDocumentXml(content);
     // 2. 组装 docx 包
     const zip = new JSZip();
     zip.file('[Content_Types].xml', DocxExporter.contentTypesXml());
@@ -109,6 +123,91 @@ export class DocxExporter {
       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
       '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
       '</Relationships>';
+  }
+
+  // ============ 富文本 HTML → document.xml ============
+
+  /** 是否为富文本 HTML 内容（受限标签集） */
+  private static isHtmlDoc(content: string): boolean {
+    const l: string = content.toLowerCase();
+    return l.indexOf('<p') >= 0 || l.indexOf('<h1') >= 0 || l.indexOf('<h2') >= 0 ||
+      l.indexOf('<h3') >= 0 || l.indexOf('<br') >= 0 || l.indexOf('<b>') >= 0 ||
+      l.indexOf('<strong>') >= 0 || l.indexOf('<i>') >= 0 || l.indexOf('<u>') >= 0 ||
+      l.indexOf('<s>') >= 0 || l.indexOf('<font') >= 0;
+  }
+
+  private static buildHtmlDocumentXml(html: string): string {
+    const runs: RichRun[] = RichHtml.htmlToRuns(html);
+    const segs: DocxSeg[] = [];
+    for (let r: number = 0; r < runs.length; r++) {
+      const run: RichRun = runs[r];
+      const parts: string[] = run.text.split('\n');
+      for (let k: number = 0; k < parts.length; k++) {
+        if (parts[k] !== '') {
+          segs.push({
+            text: parts[k], bold: run.bold || run.heading > 0, italic: run.italic,
+            underline: run.underline, strike: run.strike, color: run.color,
+            size: run.size > 0 ? run.size : 0
+          });
+        }
+        if (k < parts.length - 1) {
+          segs.push({ text: '\n', bold: false, italic: false, underline: false, strike: false, color: '', size: 0 });
+        }
+      }
+    }
+    const bodyParts: string[] = [];
+    let para: DocxSeg[] = [];
+    const flush = (): void => {
+      if (para.length === 0) {
+        return;
+      }
+      const xml: string[] = [];
+      for (let q: number = 0; q < para.length; q++) {
+        xml.push(DocxExporter.richSegXml(para[q]));
+      }
+      bodyParts.push('<w:p><w:pPr><w:spacing w:line="340" w:lineRule="auto"/></w:pPr>' +
+        xml.join('') + '</w:p>');
+      para = [];
+    };
+    for (let q: number = 0; q < segs.length; q++) {
+      const seg: DocxSeg = segs[q];
+      if (seg.text === '\n') {
+        flush();
+      } else {
+        para.push(seg);
+      }
+    }
+    flush();
+    bodyParts.push('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>' +
+      '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>');
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:body>' + bodyParts.join('') + '</w:body></w:document>';
+  }
+
+  /** 单个富文本片段 → <w:r>（含字符属性：加粗/斜体/下划线/删除线/颜色/字号） */
+  private static richSegXml(seg: DocxSeg): string {
+    const rPr: string[] = [];
+    if (seg.bold) {
+      rPr.push('<w:b/>');
+    }
+    if (seg.italic) {
+      rPr.push('<w:i/>');
+    }
+    if (seg.underline) {
+      rPr.push('<w:u w:val="single"/>');
+    }
+    if (seg.strike) {
+      rPr.push('<w:strike/>');
+    }
+    if (seg.color !== '' && /^[0-9a-fA-F]{6}$/.test(seg.color)) {
+      rPr.push('<w:color w:val="' + seg.color.toUpperCase() + '"/>');
+    }
+    // Word 字号为半磅单位：与正文 11pt(22) 区分标题大字号
+    const sz: number = seg.size >= 17 ? (seg.size >= 19 ? 38 : 32) : 22;
+    rPr.push('<w:sz w:val="' + sz + '"/><w:szCs w:val="' + sz + '"/>');
+    return '<w:r><w:rPr>' + rPr.join('') + '</w:rPr>' +
+      '<w:t xml:space="preserve">' + DocxExporter.escapeXml(seg.text) + '</w:t></w:r>';
   }
 
   // ============ Markdown → document.xml ============
