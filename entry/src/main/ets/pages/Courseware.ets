@@ -4,7 +4,7 @@
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
 import router from '@ohos.router';
-import { AiService } from '../common/AiService';
+import { AiService, CancelledError } from '../common/AiService';
 import { GenSession, GenSessionState } from '../common/GenSession';
 import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
@@ -13,6 +13,8 @@ import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
+import { StreamPreview } from '../common/components/StreamPreview';
+import { StreamPreview } from '../common/components/StreamPreview';
 
 /** 从教案页跳转携带的路由参数 */
 interface PlanImportParams {
@@ -164,7 +166,12 @@ export struct CoursewareContent {
       }
       this.autoSaveHistory(finalText);
     } catch (e) {
-      promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
+      if (e instanceof CancelledError) {
+        // 用户主动停止：提示已停止而非生成失败
+        promptAction.showToast({ message: this.t('gen.stopped') });
+      } else {
+        promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
+      }
     } finally {
       this.loading = false;
     }
@@ -214,6 +221,8 @@ export struct CoursewareContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.subject = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -224,6 +233,8 @@ export struct CoursewareContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.grade = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -234,6 +245,8 @@ export struct CoursewareContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.topic = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -244,6 +257,8 @@ export struct CoursewareContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.usage = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Text(this.t('label.remark'))
@@ -257,16 +272,21 @@ export struct CoursewareContent {
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
+          .enabled(!this.loading)
         }
 
-        Button(this.loading ? this.t('gen.loading') : this.t('act.courseware'))
+        Button(this.loading ? this.t('act.stopGen') : this.t('act.courseware'))
           .fontFamily(AppFonts.family())
           .width('100%')
           .height(44)
           .backgroundColor(this.loading ? '#E9C98F' : '#F0A93F')
-          .enabled(!this.loading)
           .onClick(() => {
-            this.generate();
+            if (this.loading) {
+              // 生成中再次点击 = 停止生成（本地停止 + 服务端取消）
+              AiService.stop(this.genKey());
+            } else {
+              this.generate();
+            }
           })
         if (this.importMode) {
           // 教案导入模式：生成按钮下方绿字提示
@@ -293,11 +313,16 @@ export struct CoursewareContent {
       if (this.bottomResult) {
         // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
       } else if (this.loading) {
-        Row({ space: 10 }) {
-          LoadingProgress().width(26).height(26).color('#F0A93F')
-          Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
-            .fontFamily(AppFonts.family())
-        }.width('100%').justifyContent(FlexAlign.Center).padding(20)
+        // 流式输出中：实时预览已生成内容（课件大纲为 JSON，按纯文本展示），随增量自动滚动到底部
+        StreamPreview({
+          text: this.result,
+          plain: true,
+          accent: '#F0A93F',
+          label: this.t('gen.streaming'),
+          labelColor: this.col('sub')
+        })
+          .layoutWeight(1)
+          .padding(16)
       } else if (this.result !== '') {
         ResultPanel({
           result: this.result,

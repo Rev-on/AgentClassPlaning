@@ -4,7 +4,7 @@
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
 import router from '@ohos.router';
-import { AiService } from '../common/AiService';
+import { AiService, CancelledError } from '../common/AiService';
 import { GenSession, GenSessionState } from '../common/GenSession';
 import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
@@ -13,8 +13,7 @@ import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
-import { RichBox } from '../common/components/RichBox';
-import { RichHtml } from '../common/RichHtml';
+import { StreamPreview } from '../common/components/StreamPreview';
 
 @Component
 export struct PlanContent {
@@ -106,7 +105,12 @@ export struct PlanContent {
       this.result = content;
       this.autoSaveHistory(content);
     } catch (e) {
-      promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
+      if (e instanceof CancelledError) {
+        // 用户主动停止：提示已停止而非生成失败
+        promptAction.showToast({ message: this.t('gen.stopped') });
+      } else {
+        promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
+      }
     } finally {
       this.loading = false;
     }
@@ -167,6 +171,8 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.subject = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -177,6 +183,8 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.version = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -187,6 +195,8 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.grade = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -197,6 +207,8 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.topic = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -207,6 +219,8 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.period = v; })
+            .enabled(!this.loading)
+            .enabled(!this.loading)
         }
         .width('100%')
         Text(this.t('label.remark'))
@@ -220,6 +234,7 @@ export struct PlanContent {
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
+          .enabled(!this.loading)
 
         if (!this.loading && this.result !== '') {
           // 生成完成：主按钮切换为"重新生成"与"跳转至课件大纲生成"
@@ -245,14 +260,18 @@ export struct PlanContent {
           }
           .width('100%')
         } else {
-          Button(this.loading ? this.t('gen.loading') : this.t('act.plan'))
+          Button(this.loading ? this.t('act.stopGen') : this.t('act.plan'))
             .fontFamily(AppFonts.family())
             .width('100%')
             .height(44)
             .backgroundColor(this.loading ? '#9DB8D9' : '#4A90D9')
-            .enabled(!this.loading)
             .onClick(() => {
-              this.generate();
+              if (this.loading) {
+                // 生成中再次点击 = 停止生成（本地停止 + 服务端取消）
+                AiService.stop(this.genKey());
+              } else {
+                this.generate();
+              }
             })
         }
       }
@@ -264,38 +283,16 @@ export struct PlanContent {
       if (this.bottomResult) {
         // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
       } else if (this.loading) {
-        if (this.result !== '') {
-          // 流式输出中：实时展示已生成内容（清洗未闭合标签，滚动阅读）
-          Column() {
-            Row({ space: 6 }) {
-              LoadingProgress().width(14).height(14).color('#4A90D9')
-              Text(this.t('gen.streaming'))
-                .fontFamily(AppFonts.family())
-                .fontSize(12)
-                .fontColor(this.col('sub'))
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.Start)
-            .padding({ bottom: 8 })
-            Scroll() {
-              RichBox({ html: RichHtml.liveSafe(this.result) })
-                .width('100%')
-            }
-            .width('100%')
-            .layoutWeight(1)
-            .scrollBar(BarState.Off)
-          }
-          .width('100%')
+        // 流式输出中：实时预览已生成内容，随增量自动滚动到底部
+        StreamPreview({
+          text: this.result,
+          plain: false,
+          accent: '#4A90D9',
+          label: this.t('gen.streaming'),
+          labelColor: this.col('sub')
+        })
           .layoutWeight(1)
           .padding(16)
-          .alignItems(HorizontalAlign.Start)
-        } else {
-          Row({ space: 10 }) {
-            LoadingProgress().width(26).height(26).color('#4A90D9')
-            Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
-              .fontFamily(AppFonts.family())
-          }.width('100%').justifyContent(FlexAlign.Center).padding(20)
-        }
       } else if (this.result !== '') {
         ResultPanel({
           result: this.result,

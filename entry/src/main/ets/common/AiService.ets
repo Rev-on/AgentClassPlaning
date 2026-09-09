@@ -1,8 +1,7 @@
 /**
- * AI 服务：封装 DeepSeek 对话补全接口（非流式，稳定性优先）
- *  - thinking 已禁用（快速模式），stream 固定 false
- *  - 偶发失败自动重试（最多 3 次），HTTP 200 但响应异常给出明确提示
- * @param onDelta 保留参数以兼容调用方，当前固定非流式不使用
+ * AI 服务：封装 DeepSeek 对话补全接口（任务模式 + SSE 流式回调，直连为兜底）
+ *  - 任务模式：提交服务端后台任务 -> feed 增量回调 -> 轮询兜底；支持"停止生成"（本地停止 + 服务端取消）
+ *  - 直连兜底：thinking 已禁用（快速模式），stream 固定 false；偶发失败自动重试（最多 3 次）
  */
 import http from '@ohos.net.http';
 import common from '@ohos.app.ability.common';
@@ -71,11 +70,46 @@ interface TaskCtl {
 interface FeedResult {
   final: boolean;
   content: string;
+  /** SSE 收到 cancelled 事件：用户主动停止 */
+  cancelled: boolean;
+}
+
+/** 用户主动停止生成的哨兵错误：页面据此提示"已停止"而非"生成失败" */
+export class CancelledError extends Error {
+  constructor() {
+    super('cancelled');
+  }
 }
 
 export class AiService {
   /** 最大尝试次数（首次 + 2 次重试） */
   private static readonly MAX_ATTEMPTS: number = 3;
+  /** 进行中的任务登记（功能类型 -> taskId）：供"停止生成"定位服务端任务 */
+  private static readonly activeTasks: Map<string, string> = new Map();
+  /** 已请求停止的功能类型集合：生成链路据此尽快终止并丢弃结果 */
+  private static readonly stopFlags: Set<string> = new Set();
+
+  /**
+   * 停止指定功能的生成（页面上"停止生成"按钮）：
+   *  1. 置本地停止标记：停止增量上屏，生成链路各环节据此尽快终止并丢弃结果；
+   *  2. 向服务端任务发送取消指令（SSE 收到 cancelled 事件 / 轮询读到取消态）。
+   * 取消请求失败不抛出：本地停止标记已保证不再展示后续结果。
+   */
+  static async stop(type: string): Promise<void> {
+    if (type === '') {
+      return;
+    }
+    AiService.stopFlags.add(type);
+    const taskId: string | undefined = AiService.activeTasks.get(type);
+    if (taskId === undefined || taskId === '') {
+      return;
+    }
+    try {
+      await GenTask.cancel(taskId);
+    } catch (e) {
+      // 服务端取消失败不阻断本地停止：停止标记会阻止后续结果上屏
+    }
+  }
 
   /**
    * 调用 DeepSeek，返回完整回复文本（非流式）
@@ -136,15 +170,26 @@ export class AiService {
       }
       let lastErr: Error = new Error('AI 请求失败，请稍后重试');
       for (let attempt: number = 0; attempt < AiService.MAX_ATTEMPTS; attempt++) {
+        // 用户已请求停止：不再重试
+        if (opts !== undefined && AiService.stopFlags.has(opts.type)) {
+          throw new CancelledError();
+        }
         try {
           const raw: string = await AiService.requestOnce(systemPrompt, userPrompt);
           const out: string = AiService.withAiNote(raw, skipNote);
+          // 请求已完成但用户已停止：丢弃结果，不再上屏
+          if (opts !== undefined && AiService.stopFlags.has(opts.type)) {
+            throw new CancelledError();
+          }
           if (opts !== undefined) {
             AiService.mirrorDone(duoBus, opts, out);
           }
           sessEnd(out);
           return out;
         } catch (e) {
+          if (e instanceof CancelledError) {
+            throw e; // 停止不重试
+          }
           lastErr = e instanceof Error ? e : new Error('AI 请求失败，请稍后重试');
         }
       }
@@ -152,13 +197,19 @@ export class AiService {
     } catch (e) {
       sessClear();
       if (duoBus) {
-        // 生成失败：下屏结果面板复位为空态，避免停留在"生成中"
+        // 生成失败/停止：下屏结果面板复位为空态，避免停留在"生成中"
         ResultBus.clear();
       }
       if (e instanceof Error) {
         throw e;
       }
       throw new Error('AI 请求失败，请稍后重试');
+    } finally {
+      // 清理任务登记与停止标记，避免影响下一次生成（登记键为任务类型 opts.type，与 stop()/chatByTask 一致）
+      if (opts !== undefined) {
+        AiService.activeTasks.delete(opts.type);
+        AiService.stopFlags.delete(opts.type);
+      }
     }
   }
 
@@ -191,10 +242,29 @@ export class AiService {
     const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt);
     // 提交成功：服务端已接受任务并开始生成，此后任何任务态失败都不应回退直连重发
     ctl.accepted = true;
+    AiService.activeTasks.set(opts.type, taskId);
     let goneFlag: boolean = opts.gone !== undefined ? opts.gone() : false;
+    // 流式回调统一出口：增量上屏 + 2in1 下半屏镜像；用户停止后冻结上屏（结果丢弃）
+    const duoBus: boolean = AiService.duoActive(opts);
+    const emit = (partial: string): void => {
+      if (AiService.stopFlags.has(opts.type)) {
+        return;
+      }
+      if (onDelta !== undefined) {
+        onDelta(partial);
+      }
+      if (duoBus) {
+        ResultBus.live(opts.type, opts.label, opts.label, partial);
+      }
+    };
     // ---- 流式阶段：页面存活且需要增量展示时才订阅 feed；失败/断开自动退回轮询 ----
     if (!goneFlag && onDelta !== undefined) {
-      const feed = await AiService.feedOnce(taskId, onDelta);
+      const feed = await AiService.feedOnce(taskId, emit);
+      // 用户停止（SSE cancelled / 本地停止标记）：清理 pending 并终止，丢弃已产出内容
+      if (feed.cancelled || AiService.stopFlags.has(opts.type)) {
+        await GenTask.clearPendingIf(opts.ctx, taskId);
+        throw new CancelledError();
+      }
       if (feed.final) {
         await GenTask.clearPending(opts.ctx);
         const left: boolean = opts.gone !== undefined ? opts.gone() : false;
@@ -227,6 +297,11 @@ export class AiService {
       } catch (e) {
         continue; // 网络抖动：跳过本轮继续轮询
       }
+      // 用户已停止 / 服务端已取消：终止轮询并丢弃结果
+      if (AiService.stopFlags.has(opts.type) || status === 'cancelled') {
+        await GenTask.clearPendingIf(opts.ctx, taskId);
+        throw new CancelledError();
+      }
       if (status === 'done') {
         await GenTask.clearPending(opts.ctx);
         if (goneFlag) {
@@ -240,7 +315,7 @@ export class AiService {
             });
           }
         } else if (onDelta !== undefined) {
-          onDelta(content);
+          emit(content);
         }
         return AiService.withAiNote(content, skipNote);
       }
@@ -271,6 +346,7 @@ export class AiService {
     onDelta: (partial: string) => void): Promise<FeedResult> {
     return new Promise<FeedResult>((resolve) => {
       let acc: string = '';
+      let cancelledFlag: boolean = false;
       let settled: boolean = false;
       let stallTimer: number = -1;
       let cl: SseClient | null = null;
@@ -287,7 +363,7 @@ export class AiService {
           cl.close();
           cl = null;
         }
-        const fr: FeedResult = { final: final, content: content };
+        const fr: FeedResult = { final: final, content: content, cancelled: cancelledFlag };
         resolve(fr);
       };
       const touch = (): void => {
@@ -320,8 +396,12 @@ export class AiService {
             const c: string = obj !== null && obj['c'] !== undefined && String(obj['c']) !== ''
               ? String(obj['c']) : acc;
             settle(true, c);
-          } else if (evt.event === 'error' || evt.event === 'cancelled') {
-            settle(false, ''); // 交给轮询兜底读取失败/取消详情
+          } else if (evt.event === 'cancelled') {
+            // 用户主动停止：记录标记后终止 feed（不走轮询兜底，避免停止后仍等待）
+            cancelledFlag = true;
+            settle(false, '');
+          } else if (evt.event === 'error') {
+            settle(false, ''); // 交给轮询兜底读取失败详情
           }
         },
         onEnd: (): void => {

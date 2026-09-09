@@ -3,7 +3,7 @@
  */
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
-import { AiService } from '../common/AiService';
+import { AiService, CancelledError } from '../common/AiService';
 import { GenSession, GenSessionState } from '../common/GenSession';
 import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
@@ -12,6 +12,8 @@ import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
+import { StreamPreview } from '../common/components/StreamPreview';
+import { StreamPreview } from '../common/components/StreamPreview';
 
 @Component
 export struct QuizContent {
@@ -102,7 +104,12 @@ export struct QuizContent {
       this.result = content;
       this.autoSaveHistory(content);
     } catch (e) {
-      promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
+      if (e instanceof CancelledError) {
+        // 用户主动停止：提示已停止而非生成失败
+        promptAction.showToast({ message: this.t('gen.stopped') });
+      } else {
+        promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
+      }
     } finally {
       this.loading = false;
     }
@@ -150,6 +157,7 @@ export struct QuizContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.subject = v; })
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -160,6 +168,7 @@ export struct QuizContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.grade = v; })
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -170,6 +179,7 @@ export struct QuizContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.topic = v; })
+            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -180,6 +190,7 @@ export struct QuizContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.requirement = v; })
+            .enabled(!this.loading)
         }
         .width('100%')
         Text(this.t('label.remark'))
@@ -193,15 +204,20 @@ export struct QuizContent {
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
+          .enabled(!this.loading)
 
-        Button(this.loading ? this.t('gen.loading') : this.t('act.quiz'))
+        Button(this.loading ? this.t('act.stopGen') : this.t('act.quiz'))
           .fontFamily(AppFonts.family())
           .width('100%')
           .height(44)
           .backgroundColor(this.loading ? '#8FC3A8' : '#3E9B6F')
-          .enabled(!this.loading)
           .onClick(() => {
-            this.generate();
+            // 生成中：停止当前生成任务；空闲：开始生成
+            if (this.loading) {
+              AiService.stop('quiz');
+            } else {
+              this.generate();
+            }
           })
       }
       .width('100%')
@@ -212,11 +228,16 @@ export struct QuizContent {
       if (this.bottomResult) {
         // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
       } else if (this.loading) {
-        Row({ space: 10 }) {
-          LoadingProgress().width(26).height(26).color('#3E9B6F')
-          Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
-            .fontFamily(AppFonts.family())
-        }.width('100%').justifyContent(FlexAlign.Center).padding(20)
+        // 生成中：实时流式预览区（自动滚动到底部）
+        StreamPreview({
+          text: this.result,
+          plain: true,
+          accent: '#3E9B6F',
+          label: this.t('gen.streaming'),
+          labelColor: this.col('sub')
+        })
+          .layoutWeight(1)
+          .padding(16)
       } else if (this.result !== '') {
         ResultPanel({
           result: this.result,
