@@ -22,3 +22,13 @@ node_modules/
 /RevTechingMaster-Android.apk
 *.apk
 *.hap
+
+# Windows 桌面端构建产物与依赖目录（不入库）
+/Windows/dist/
+/Windows/build/
+/Windows/node_modules/
+
+# Windows 桌面端构建产物与依赖目录（不入库）
+/Windows/dist/
+/Windows/build/
+/Windows/node_modules/

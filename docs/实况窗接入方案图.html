@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rev TechingMaster · 实况窗（PROGRESS）接入方案图</title>
+<style>
+  :root{
+    --bg0:#0b1020; --bg1:#111a33; --card:#16203c; --card2:#1b2747;
+    --line:#2c3a63; --ink:#e8eefc; --sub:#9fb0d4; --dim:#6f7fa6;
+    --brand:#5BA8A0; --amber:#F0A93F; --violet:#7A6BC4; --blue:#4A90D9; --red:#E4615B;
+    --ok:#4fbf8f; --warn:#e7c255;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(90,168,160,.18), transparent 60%),
+      radial-gradient(1000px 500px at 110% 10%, rgba(122,107,196,.16), transparent 55%),
+      linear-gradient(160deg, var(--bg0), var(--bg1) 55%, #0c1226);
+    color:var(--ink); font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
+    padding:34px 26px 60px; min-height:100vh;
+  }
+  .wrap{max-width:1180px; margin:0 auto;}
+  h1{font-size:26px; letter-spacing:.5px; display:flex; align-items:center; gap:12px;}
+  h1 .dot{width:14px;height:14px;border-radius:4px;background:linear-gradient(135deg,var(--brand),var(--blue)); box-shadow:0 0 18px rgba(90,168,160,.8);}
+  .sub{color:var(--sub); font-size:13px; margin:8px 0 0 26px; line-height:1.7;}
+  .kpis{display:flex; gap:12px; margin:20px 0 6px 26px; flex-wrap:wrap;}
+  .kpi{border:1px solid var(--line); background:rgba(27,39,71,.55); border-radius:10px; padding:8px 14px; font-size:12px; color:var(--sub);}
+  .kpi b{color:var(--ink); font-size:15px; margin-right:6px;}
+  h2{font-size:17px; margin:34px 0 14px; display:flex; align-items:center; gap:10px;}
+  h2 .tag{font-size:11px; color:#0b1020; background:var(--brand); border-radius:6px; padding:2px 8px; font-weight:700;}
+  h2 .tag.v{background:var(--violet);}
+  h2 .tag.a{background:var(--amber);}
+  .card{background:linear-gradient(180deg,var(--card),var(--card2)); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,.25);}
+  /* 链路图 */
+  .lane{display:grid; grid-template-columns:118px 1fr; border:1px dashed var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden;}
+  .lane .who{background:rgba(255,255,255,.03); color:var(--sub); font-size:12px; letter-spacing:2px; display:flex; align-items:center; justify-content:center; writing-mode:vertical-rl; gap:0;}
+  .lane .who span{letter-spacing:4px;}
+  .flow{display:flex; align-items:stretch; gap:0; padding:14px 10px; overflow-x:auto;}
+  .node{flex:0 0 auto; max-width:196px; background:#0e1730; border:1px solid var(--line); border-radius:12px; padding:10px 12px; position:relative; font-size:12.5px;}
+  .node .n{font-size:10px; color:var(--dim); letter-spacing:1px; margin-bottom:4px;}
+  .node .t{font-weight:700; font-size:13.5px; color:var(--ink);}
+  .node .d{color:var(--sub); font-size:11.5px; line-height:1.6; margin-top:4px;}
+  .node .ep{display:inline-block; font-family:Consolas,monospace; font-size:10px; color:var(--amber); background:rgba(240,169,63,.1); border:1px solid rgba(240,169,63,.3); border-radius:5px; padding:1px 6px; margin-top:6px;}
+  .node.hl{border-color:var(--brand); box-shadow:0 0 0 1px rgba(90,168,160,.5), 0 0 24px rgba(90,168,160,.15);}
+  .node.ai{border-color:var(--violet);}
+  .node.warn{border-color:var(--warn);}
+  .arrow{align-self:center; color:var(--dim); font-size:20px; margin:0 -2px; flex:0 0 auto;}
+  .arrow .a-lbl{font-size:10px; color:var(--amber); display:block; text-align:center; letter-spacing:0;}
+  .arrow .a2-lbl{font-size:10px; color:var(--blue); display:block; text-align:center;}
+  .note{font-size:11.5px; color:var(--dim); margin-top:10px; line-height:1.8;}
+  .note b{color:var(--sub);}
+  /* 状态机 */
+  .sm{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+  .st{border:1px solid var(--line); border-radius:12px; background:#0e1730; padding:10px 12px; font-size:12px; position:relative;}
+  .st .id{position:absolute; top:-9px; left:10px; background:var(--blue); color:#0b1020; font-size:10px; font-weight:800; padding:1px 8px; border-radius:10px;}
+  .st.g .id{background:var(--ok);} .st.o .id{background:var(--amber);} .st.x .id{background:var(--red);} .st.p .id{background:var(--violet);}
+  .st .tt{font-weight:700; margin:2px 0 6px; font-size:13px;}
+  .st ul{list-style:none; color:var(--sub); line-height:1.65;}
+  .st li::before{content:"· "; color:var(--brand);}
+  .st .fb{color:var(--warn); font-size:11px; border-top:1px dashed var(--line); margin-top:7px; padding-top:6px;}
+  .st .fb::before{content:"";}
+  .flowline{margin:8px 0 18px; display:flex; justify-content:center; gap:0; color:var(--dim); font-size:11px;}
+  /* 表格 */
+  table{width:100%; border-collapse:collapse; font-size:12px;}
+  th{color:var(--sub); text-align:left; font-weight:600; font-size:11px; letter-spacing:1px;}
+  th,td{border-bottom:1px solid var(--line); padding:9px 10px; vertical-align:top; line-height:1.6;}
+  tr:last-child td{border-bottom:none;}
+  td.m{font-family:Consolas,monospace; color:var(--amber); font-size:11px;}
+  .pill{display:inline-block; border-radius:20px; padding:1px 9px; font-size:11px; border:1px solid;}
+  .pill.c{border-color:var(--brand); color:var(--brand);}
+  .pill.s{border-color:var(--blue); color:#9cc2ec;}
+  .pill.d{border-color:var(--warn); color:var(--warn);}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .chip{display:flex; gap:10px; align-items:flex-start; background:#0e1730; border:1px solid var(--line); border-radius:12px; padding:12px; font-size:12px; color:var(--sub); line-height:1.7;}
+  .chip .ic{flex:0 0 30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:16px;}
+  .chip b{color:var(--ink);}
+  .foot{margin-top:26px; color:var(--dim); font-size:11px; text-align:center; line-height:1.8;}
+  @media(max-width:900px){ .sm{grid-template-columns:repeat(2,1fr);} .grid2{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1><span class="dot"></span>实况窗（PROGRESS）接入方案图</h1>
+  <div class="sub">Rev TechingMaster · AI 生成任务 · Live View Kit「进度类型」合规接入 · 2026-09</div>
+
+  <div class="kpis">
+    <div class="kpi"><b>EVENT</b>PROGRESS</div>
+    <div class="kpi"><b>布局</b>LAYOUT_TYPE_PROGRESS</div>
+    <div class="kpi"><b>ID 统一</b>seed = liveView id = notifyId</div>
+    <div class="kpi"><b>通道</b>本地创建 + Push 结束 + Alert 通知</div>
+    <div class="kpi"><b>兜底</b>进行中普通通知</div>
+  </div>
+
+  <h2><span class="tag">A</span>总体链路（泳道）</h2>
+  <div class="card">
+
+    <div class="lane">
+      <div class="who"><span>客 户 端</span></div>
+      <div class="flow">
+        <div class="node"><div class="n">S0 · 用户操作</div><div class="t">点击“生成教案”</div><div class="d">组装 system+user（含语言规则），一键提交</div></div>
+        <div class="arrow">→<span class="a-lbl">POST /api/task</span></div>
+        <div class="node hl"><div class="n">S1 · 创建实况窗</div><div class="t">教案生成中</div><div class="ep">startLiveView</div><div class="d">event=PROGRESS · 进度 10% · 胶囊文本· 系统常驻</div></div>
+        <div class="arrow">→<span class="a-lbl">POST /task/:id/liveview</span></div>
+        <div class="node"><div class="n">S2 · 轮询 &amp; 进度</div><div class="t">12% → 85%</div><div class="ep">updateLiveView ×N</div><div class="d">每 ~10s 递增 · sequence+1 · 离开页面即暂停</div></div>
+        <div class="arrow">→<span class="a-lbl">GET /task/:id</span></div>
+        <div class="node hl"><div class="n">S3 · 感知完成</div><div class="t">结果回写 / 入库</div><div class="ep">stopLiveView</div><div class="d">done→页面展示+历史；failed→提示</div></div>
+      </div>
+    </div>
+
+    <div class="lane">
+      <div class="who"><span>服 务 端</span></div>
+      <div class="flow">
+        <div class="node"><div class="n">接收任务</div><div class="t">任务队列</div><div class="ep">data/tasks.json</div><div class="d">串行执行 · 重启不丢 · 断网不影响（进程已杀也继续）</div></div>
+        <div class="arrow">→</div>
+        <div class="node ai"><div class="n">生成执行</div><div class="t">DeepSeek</div><div class="d">非流式 · 模型 deepseek-v4-flash · 150s 超时</div></div>
+        <div class="arrow">→</div>
+        <div class="node warn"><div class="n">S4 · 完成回调</div><div class="t">结束实况窗</div><div class="ep">push-type:7 · op:2</div><div class="d">仅当客户端上报过 activityId；失败仅记日志</div></div>
+        <div class="arrow">→<span class="a2-lbl">push-type:0</span></div>
+        <div class="node warn"><div class="n">S4 · 完成通知</div><div class="t">您的教案已生成完成</div><div class="ep">notifyId=seed</div><div class="d">foregroundShow=false · 前台不重复弹</div></div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>虚线 = 兜底/降级路径。</b>
+      <b>实况窗创建失败</b>（权益未申请 1003500005 / 开关关闭 1003500004 / 非前台 / 安卓跨端不支持）→ 自动降级为 <b>“教案生成中”常驻通知</b>，同 notifyId，完成通知直接覆盖。
+      <b>进程被杀</b>：任务在服务端继续 → 完成时服务端 push 结束实况窗 + 下发完成通知；用户冷启动后 <b>recover</b> 再领取结果入库（双保险）。
+    </div>
+  </div>
+
+  <h2><span class="tag">B</span>实况窗节点状态机</h2>
+  <div class="card">
+    <div class="sm">
+      <div class="st"><span class="id">S0</span><div class="tt">已提交 pending</div><ul><li>POST /api/task → 202</li><li>客户端写入 pending 记录</li></ul><div class="fb">提交失败 → 回退同步生成（历史链路）</div></div>
+      <div class="st g"><span class="id">S1</span><div class="tt">生成中 running</div><ul><li>startLiveView 建窗</li><li>胶囊/卡片：“教案生成中”</li><li>进度条 10%</li></ul><div class="fb">失败 → 降级普通“生成中”通知</div></div>
+      <div class="st o"><span class="id">S2</span><div class="tt">进度推进</div><ul><li>updateLiveView（≤85%）</li><li>文本副内容“正在后台为您生成…”</li></ul><div class="fb">页面离开/被杀 → 系统维持显示</div></div>
+      <div class="st g"><span class="id">S3</span><div class="tt">完成 done</div><ul><li>本地 stopLiveView</li><li>服务端 push op2 结束（兜底）</li><li>结果入库 + 完成通知</li></ul><div class="fb">通知即回执，可点击回看</div></div>
+      <div class="st x"><span class="id">S5</span><div class="tt">失败 failed</div><ul><li>结束实况窗</li><li>“生成失败”通知</li><li>页面/历史可见错误信息</li></ul><div class="fb">重试走 S0 新任务</div></div>
+      <div class="st p"><span class="id">S6</span><div class="tt">超时清理</div><ul><li>2h 未更新：隐藏胶囊/锁屏</li><li>4h：系统判定结束并清除</li></ul><div class="fb">免开发干预的最终兜底</div></div>
+      <div class="st p"><span class="id">S7</span><div class="tt">异常恢复 recover</div><ul><li>冷/热启动主界面触发</li><li>done→结束+保存+通知</li><li>running→保持展示</li></ul><div class="fb">网络异常保留 pending 重试</div></div>
+      <div class="st warn"><span class="id">FB</span><div class="tt">降级路径</div><ul><li>进行中普通通知（常驻）</li><li>完成/失败通知同 id 覆盖</li><li>安卓端默认此路径</li></ul><div class="fb">功能可用性不受实况窗权益影响</div></div>
+    </div>
+    <div class="flowline">S0 ──▶ S1 ──▶ S2 ──▶ (S3 完成 | S5 失败) ──┴─▶ 通知回执；任一步异常 ──▶ FB 降级 / S7 恢复</div>
+  </div>
+
+  <h2><span class="tag">C</span>消息与职责矩阵</h2>
+  <div class="card">
+    <table>
+      <tr><th>动作</th><th>触发方</th><th>接口 / 消息</th><th>关键字段</th><th>失败策略</th></tr>
+      <tr><td>提交任务</td><td class="pill c">客户端</td><td class="m">POST /api/task</td><td>type/label/system/user/deviceId/notifySeed/notify*</td><td>回退同步生成（自动）</td></tr>
+      <tr><td>创建实况窗</td><td class="pill c">客户端</td><td class="m">startLiveView</td><td>id=seed · event=PROGRESS · seq=1 · progress=10 · LAYOUT_TYPE_PROGRESS</td><td>降级普通通知</td></tr>
+      <tr><td>上报建窗</td><td class="pill c">客户端</td><td class="m">POST /api/task/:id/liveview</td><td>activityId=seed · event=PROGRESS</td><td>服务端跳过结束推送（不误发）</td></tr>
+      <tr><td>进度更新</td><td class="pill c">客户端</td><td class="m">updateLiveView</td><td>seq+1 · progress 12→85</td><td>忽略（系统保留上次状态）</td></tr>
+      <tr><td>查询状态</td><td class="pill c">客户端</td><td class="m">GET /api/task/:id</td><td>status/content/error</td><td>网络抖动跳过继续轮询</td></tr>
+      <tr><td>结束实况窗</td><td class="pill c">客户端</td><td class="m">stopLiveView</td><td>id=seed（本地感知完成）</td><td>静默</td></tr>
+      <tr><td>结束实况窗</td><td class="pill s">服务端</td><td class="m">push-type:7 · op:2</td><td>activityId=seed · event=PROGRESS</td><td>仅任务存在 liveView 才发；失败仅日志</td></tr>
+      <tr><td>完成/失败通知</td><td class="pill s">服务端</td><td class="m">push-type:0</td><td>notifyId=seed · foregroundShow=false · clickAction→首页</td><td>未配 AGC 凭据则跳过（本地仍兜底）</td></tr>
+      <tr><td>结果入库</td><td class="pill c">客户端</td><td class="m">HistoryStore.autoAdd</td><td>开关“自动保存”开启时生效 · 去重</td><td>开关关闭则不写</td></tr>
+      <tr><td>恢复领取</td><td class="pill c">客户端</td><td class="m">GenTask.recover</td><td>pending → fetchTask → done/failed/running 分流</td><td>网络异常保留，下轮再试</td></tr>
+    </table>
+  </div>
+
+  <h2><span class="tag">D</span>关键设计约束</h2>
+  <div class="grid2">
+    <div class="chip"><div class="ic">🔗</div><div><b>ID 三合一</b><br>实况窗 id = 任务 seed = 通知 notifyId。结束消息/完成通知可精确覆盖“生成中”表现；服务端只在收到上报后才发结束消息，规避对不存在 id 误发的 24h 限用。</div></div>
+    <div class="chip"><div class="ic">🛡</div><div><b>双通道幂等收尾</b><br>进程存活：本地 stopLiveView；进程被杀：服务端 push op2 结束。两条路径重复执行无业务危害。</div></div>
+    <div class="chip"><div class="ic">✅</div><div><b>合规边界</b><br>采用 Live View Kit 官方“进度类型 PROGRESS”，适用于用户手动开启的任务；生成由用户点击发起，符合场景定义。</div></div>
+    <div class="chip"><div class="ic">📵</div><div><b>全链路降级</b><br>权益未审（1003500005）/开关关（1003500004）/非前台/Android 跨端 → 进行中通知；Push 未配置 → 本地通知兜底；结果永不丢失（服务端持久化+recover）。</div></div>
+    <div class="chip"><div class="ic">⏱</div><div><b>生命周期托管</b><br>实况窗由系统渲染维护：2h 未更新隐藏胶囊与锁屏、4h 自动结束；本地创建仅要求前台，创建后与进程解耦。</div></div>
+    <div class="chip"><div class="ic">🧩</div><div><b>文案随语言</b><br>“{type}生成中 / 已生成完成…”由 I18n 词典输出（五语言），服务端仅透传客户端拼好的本地化标题与正文。</div></div>
+  </div>
+
+  <div class="foot">说明：本图为方案示意，实现以上一轮代码改动为准（GenTask / AiService / server tasks+push）。生成中进度因无精确可测进度，采用缓增式展示并封顶 85%。</div>
+</div>
+</body>
+</html>

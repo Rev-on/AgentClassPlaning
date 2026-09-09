@@ -77,9 +77,11 @@ Rev_Techingmaster/
 │       ├── ets/
 │       │   ├── entryability/     # 应用入口 Ability
 │       │   ├── pages/            # 各功能页面
-│       │   └── common/           # AI 服务、代理配置、字体、主题、五语言词典、存储、通用组件
-│       └── resources/            # 资源与路由配置（rawfile/fonts 内置字体）
-├── server/                       # AI 中转代理（Node.js，密钥只存这里）
+│       │   └── common/           # AI 服务、流式客户端、会话总线、代理配置、字体、主题、五语言词典、存储、跨端适配
+│       └── resources/            # 资源与路由配置（rawfile/fonts 内置字体、rawfile/pptskel.pptx 课件骨架）
+├── server/                       # AI 中转代理（Node.js，密钥只存这里；含《AI 部署手册》）
+├── Windows/                      # Windows 桌面版（Electron 复刻，含打包脚本与安装包输出）
+├── docs/                         # 设计文档（实况窗 PROGRESS 接入方案图）
 ├── fonts/                        # 少数民族字体源文件与《字体清单》
 ├── keys/                         # 签名证书（请勿提交到公开仓库）
 ├── oh-package.json5              # 工程与依赖声明
@@ -87,7 +89,7 @@ Rev_Techingmaster/
 └── LICENSE                       # AGPL-3.0
 ```
 
-核心逻辑集中在 `entry/src/main/ets/common/`：`AiService.ets`（请求 + 统一 AI 尾注）、`ApiConfig.ets`（代理地址与共享令牌，无密钥明文）、`AppFonts.ets`（按语言选字体）、`I18n.ets` 与 `*Dict.ets`（五语言词典）、`ClassStore.ets`/`HistoryStore.ets`/`AcceptStore.ets`（本地数据）。
+核心逻辑集中在 `entry/src/main/ets/common/`：`AiService.ets`（请求 + 统一 AI 尾注）、`SseClient.ets`（自研 SSE 流式客户端，兼容 ArkUI-X 的 UTF-8 解码）、`GenTask.ets`（任务提交 / 轮询兜底 / 未完成恢复）、`GenSession.ets`（流式会话总线）、`PptxExporter.ets` 与 `pptskel.pptx`（课件 PPT 导出）、`Duo2in1.ets`（二合一 / 折叠屏跨端适配）、`ApiConfig.ets`（代理地址与共享令牌，无密钥明文）、`AppFonts.ets`（按语言选字体）、`I18n.ets` 与 `*Dict.ets`（五语言词典）、`ClassStore.ets`/`HistoryStore.ets`/`AcceptStore.ets`（本地数据）。
 
 ## 环境与构建（HarmonyOS）
 
@@ -109,13 +111,43 @@ cd C:\Users\laoyu\Desktop\RevTechingX_Android
 ace build apk      # 增量约 30 秒；产物在 .arkui-x\android\app\build\outputs\apk\release\
 ```
 
-跨端适配说明：工程经 `ace modify` 转换；已移除鸿蒙专用的备份扩展；跳转改用 UIContext 路由；安卓清单允许对 AI 代理的明文 HTTP 请求。图标与鸿蒙一致（由同一 background/foreground 合成）。
+跨端适配说明：工程经 `ace modify` 转换；已移除鸿蒙专用的备份扩展；跳转改用 UIContext 路由（经 `Splash.ets` 验证，`router.replaceUrl` 跨平台不可用）；二合一 / 折叠屏的双窗口逻辑抽到 `Duo2in1.ets`（Android 侧为空实现）；AI 代理统一走 HTTPS（`https://rev-on.site:3000`）。图标与鸿蒙一致（由同一 background/foreground 合成）。
+
+## 环境与构建（Windows 桌面版，基于 Electron）
+
+桌面版基于 Electron 复刻鸿蒙端核心功能（AI 备课生成、Word/Excel/PPT 文档导出、五语言界面），工作目录 `Windows/`，界面代码在 `renderer/`（原生 HTML/JS + `i18n-data.js` 五语言词条）。
+
+```powershell
+cd Windows
+npm run dist      # 打包 NSIS 安装包（来源：Windows/package.json > scripts.dist，等价 npx electron-builder --win nsis）
+```
+
+产物为 `dist\RevTechingMaster-Setup-1.0.0.exe`（x64 NSIS 安装包）。说明：
+
+- 打包脚本设置国内镜像（`ELECTRON_MIRROR`、`ELECTRON_BUILDER_BINARIES_MIRROR` → npmmirror），见 `Windows/build-with-icon.ps1`。
+- 写入 exe 图标与版本资源需要管理员权限：使用 `Windows/以管理员身份打包.bat`（自动 UAC 提权）或在管理员 PowerShell 中运行 `build-with-icon.ps1`。
+- 打包前需存在 `Windows/build/icon.ico`（由 png-to-ico 生成）；开发调试运行 `npm start`（`electron .`）。
+
+## 环境与构建（Windows 桌面版，基于 Electron）
+
+桌面版基于 Electron 复刻鸿蒙端核心功能（AI 备课生成、Word/Excel/PPT 文档导出、五语言界面），工作目录 `Windows/`，界面代码在 `renderer/`（原生 HTML/JS + `i18n-data.js` 五语言词条）。
+
+```powershell
+cd Windows
+npm run dist      # 打包 NSIS 安装包（来源：Windows/package.json > scripts.dist，等价 npx electron-builder --win nsis）
+```
+
+产物为 `dist\RevTechingMaster-Setup-1.0.0.exe`（x64 NSIS 安装包）。说明：
+
+- 打包脚本设置国内镜像（`ELECTRON_MIRROR`、`ELECTRON_BUILDER_BINARIES_MIRROR` → npmmirror），见 `Windows/build-with-icon.ps1`。
+- 写入 exe 图标与版本资源需要管理员权限：使用 `Windows/以管理员身份打包.bat`（自动 UAC 提权）或在管理员 PowerShell 中运行 `build-with-icon.ps1`。
+- 打包前需存在 `Windows/build/icon.ico`（由 png-to-ico 生成）；开发调试运行 `npm start`（`electron .`）。
 
 ## AI 服务配置与安全
 
-- DeepSeek API Key 只存在于 `server/.env` 的 `DEEPSEEK_API_KEY`，前端源码无任何密钥明文；部署与配置见 `server/README.md`。
-- 前端请求地址统一为 `ApiConfig.PROXY_BASE_URL`（默认 `http://123.60.130.45:3000/v1/chat/completions`）。
-- 强烈建议在服务器 `.env` 设置 `PROXY_TOKEN`，并同步填写到 `ApiConfig.PROXY_TOKEN`，防止代理被滥用；正式演示前为服务器配置 HTTPS，并把前端地址改为 `https://`。
+- DeepSeek API Key 只存在于 `server/.env` 的 `DEEPSEEK_API_KEY`，前端源码无任何密钥明文；部署与配置见 `server/AI部署手册.md`。
+- 前端请求地址统一在 `ApiConfig.ets` 配置：`PROXY_BASE_URL`（默认 `https://rev-on.site:3000/v1/chat/completions`）、`SERVER_BASE_URL`（默认 `https://rev-on.site:3000/api`）；代理 3000 端口仅支持 HTTPS，旧的 HTTP 地址会返回空响应（属正常现象）。
+- 可选防滥用：在服务器 `.env` 设置 `PROXY_TOKEN` 并同步到 `ApiConfig.PROXY_TOKEN`（当前两端均为空，保持一致即可正常访问）；推送功能已从前端移除，服务端以 `PUSH_ENABLED` 环境变量控制推送开关（默认关闭）。
 - 曾随早期安装包分发的直连密钥应已在 DeepSeek 开放平台重置；`keys/` 目录的签名证书勿提交公开仓库。
 
 ## 开源许可
