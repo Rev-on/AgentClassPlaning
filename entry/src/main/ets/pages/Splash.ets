@@ -5,7 +5,6 @@
  *  3) 图案成形后，品牌名/标语/版本号整体淡入
  *  4) 停留后跳转主界面（含失败重试与超时兜底）
  */
-import { router } from '@kit.ArkUI';
 import display from '@ohos.display';
 import { image } from '@kit.ImageKit';
 import common from '@ohos.app.ability.common';
@@ -323,9 +322,10 @@ struct Splash {
   }
 
   private goIndex(): void {
-    router.replaceUrl({ url: 'pages/Index' }).catch(() => {
+    // ArkUI-X 跨端：使用 UIContext 路由（router.replaceUrl 不支持跨平台）
+    this.getUIContext().getRouter().replaceUrl({ url: 'pages/Index' }).catch(() => {
       setTimeout(() => {
-        router.replaceUrl({ url: 'pages/Index' }).catch(() => {
+        this.getUIContext().getRouter().replaceUrl({ url: 'pages/Index' }).catch(() => {
           // 再次失败则停留在当前页
         });
       }, 800);

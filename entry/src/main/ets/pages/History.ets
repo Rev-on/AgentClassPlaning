@@ -229,9 +229,10 @@ export struct HistoryContent {
   /** 多选删除状态 */
   @State multi: boolean = false;
   @State picked: Set<string> = new Set<string>();
-  @State delDlgTitle: string = '';
-  @State delDlgMsg: string = '';
-  private delDlg: CustomDialogController | null = null;
+  /** 页内删除确认遮罩（自绘层，规避系统对话框闪退） */
+  @State showDel: boolean = false;
+  @State delRemain: number = 2;
+  private delTimer: number = -1;
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
   private dialogController: CustomDialogController =
@@ -255,16 +256,6 @@ export struct HistoryContent {
 
   aboutToAppear(): void {
     this.loadRecords();
-    this.delDlg = new CustomDialogController({
-      builder: DeleteHistoryDialog({
-        title: $delDlgTitle,
-        message: $delDlgMsg,
-        onConfirm: (): void => {
-          this.doDeleteSelected();
-        }
-      }),
-      autoCancel: true
-    });
   }
 
   /** 页面显示时刷新 */
@@ -306,27 +297,58 @@ export struct HistoryContent {
     this.picked = new Set<string>();
   }
 
-  /** 点击删除：弹红色确认框（2 秒后可确认） */
+  /** 点击删除：显示页内确认遮罩（删除键 2 秒后可确认） */
   private openDeleteSelected(): void {
     if (this.picked.size === 0) {
       promptAction.showToast({ message: I18n.t('hist.chooseHint') });
       return;
     }
-    this.delDlgTitle = I18n.t('hist.delTitle');
-    this.delDlgMsg = I18n.t('hist.delMsg').replace('{n}', this.picked.size.toString());
-    if (this.delDlg !== null) {
-      this.delDlg.open();
+    this.showDel = true;
+    this.delRemain = 2;
+    this.startDelTimer();
+  }
+
+  private startDelTimer(): void {
+    if (this.delTimer !== -1) {
+      return;
     }
+    this.delTimer = setInterval(() => {
+      if (this.delRemain > 0) {
+        this.delRemain--;
+      }
+      if (this.delRemain <= 0) {
+        this.stopDelTimer();
+      }
+    }, 1000);
+  }
+
+  private stopDelTimer(): void {
+    if (this.delTimer !== -1) {
+      clearInterval(this.delTimer);
+      this.delTimer = -1;
+    }
+  }
+
+  /** 取消删除：返回多选状态 */
+  private cancelDelete(): void {
+    this.stopDelTimer();
+    this.showDel = false;
+  }
+
+  aboutToDisappear(): void {
+    this.stopDelTimer();
   }
 
   /** 确认删除所选记录 */
   private doDeleteSelected(): void {
+    this.stopDelTimer();
     const ctx = getContext(this) as common.UIAbilityContext;
     const keys: string[] = [];
     this.picked.forEach((k: string) => {
       keys.push(k);
     });
     this.exitMulti();
+    this.showDel = false;
     HistoryStore.removeRecords(ctx, keys).then(() => {
       this.loadRecords();
       promptAction.showToast({ message: I18n.t('toast.delDone') });
@@ -349,9 +371,68 @@ export struct HistoryContent {
     });
   }
 
+  /** 删除确认遮罩层（自绘：白底取消 + 红色删除，删除键 2 秒冷却） */
+  @Builder
+  deleteConfirmOverlay() {
+    Column() {
+      Column({ space: 14 }) {
+        Text(this.t('hist.delTitle'))
+          .fontFamily(AppFonts.family())
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.col('title'))
+          .width('100%')
+        Text(this.t('hist.delMsg').replace('{n}', this.picked.size.toString()))
+          .fontFamily(AppFonts.family())
+          .fontSize(14)
+          .fontColor(this.col('text'))
+          .lineHeight(21)
+          .width('100%')
+        Row({ space: 12 }) {
+          Button(this.t('btn.cancel'))
+            .fontFamily(AppFonts.family())
+            .fontSize(15)
+            .height(40)
+            .layoutWeight(1)
+            .backgroundColor('#FFFFFF')
+            .fontColor('#1B1B1F')
+            .border({ width: 1, color: '#E3E6EB' })
+            .onClick(() => {
+              this.cancelDelete();
+            })
+          Button(this.t('btn.delete') + (this.delRemain > 0 ? '（' + this.delRemain + 's）' : ''))
+            .fontFamily(AppFonts.family())
+            .fontSize(15)
+            .height(40)
+            .layoutWeight(1)
+            .backgroundColor('#DC2626')
+            .fontColor(Color.White)
+            .enabled(this.delRemain <= 0)
+            .opacity(this.delRemain <= 0 ? 1 : 0.5)
+            .onClick(() => {
+              if (this.delRemain <= 0) {
+                this.doDeleteSelected();
+              }
+            })
+        }
+        .width('100%')
+      }
+      .width('86%')
+      .padding(20)
+      .backgroundColor(this.col('card'))
+      .borderRadius(16)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('rgba(0,0,0,0.45)')
+  }
+
   build() {
-    Column({ space: 10 }) {
-      PageHeader({ title: this.t('hist.title') })
+    Stack({ alignContent: Alignment.Center }) {
+      Column({ space: 10 }) {
+        PageHeader({ title: this.t('hist.title') })
 
       if (this.multi) {
         Row({ space: 10 }) {
@@ -500,11 +581,18 @@ export struct HistoryContent {
         .layoutWeight(1)
         .scrollBar(BarState.Off)
       }
+      }
+      .width('100%')
+      .height('100%')
+      .padding(16)
+      .backgroundColor(this.col('bg'))
+
+      if (this.showDel) {
+        this.deleteConfirmOverlay()
+      }
     }
     .width('100%')
     .height('100%')
-    .padding(16)
-    .backgroundColor(this.col('bg'))
   }
 }
 

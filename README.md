@@ -1,8 +1,8 @@
 # Rev TechingMaster
 
-面向初中教师的鸿蒙原生教学备课智能体（同步产出安卓版 APK），将教案撰写、课件大纲、分层练习、学情分析、排座位、家校沟通等日常事务集成到一个应用中，由 AI 协助完成初稿，教师改动后使用。
+面向初中教师的鸿蒙原生教学备课智能体（同步产出安卓版 APK 与 Windows 桌面版），将教案撰写、课件大纲、分层练习、学情分析、排座位、家校沟通等日常事务集成到一个应用中，由 AI 协助完成初稿，教师改动后使用。
 
-本项目为 2026 年无锡市“人工智能 + 教育”创新应用技能大赛参赛作品（智能体开发方向），使用 HarmonyOS 原生 ArkTS 开发，核心代码遵循 AGPL-3.0 协议开源。
+本项目为 2026 年无锡市“人工智能 + 教育”创新应用技能大赛参赛作品（智能体开发方向），使用 HarmonyOS 原生 ArkTS 开发，Windows 桌面版基于 Electron 复刻，核心代码遵循 AGPL-3.0 协议开源。
 
 ## 功能特性
 
@@ -59,13 +59,13 @@ pages/Settings      设置
 | --- | --- |
 | 开发语言 | ArkTS（声明式 UI），Stage 模型 |
 | 系统版本 | HarmonyOS，targetSdk / compatibleSdkVersion 6.0.0(20) |
-| AI 接入 | 自建中转代理（`server/`）→ DeepSeek 开放接口，默认模型 deepseek-v4-flash |
+| AI 接入 | 自建中转代理（`server/`）→ DeepSeek 开放接口（SSE 流式 + 轮询兜底），默认模型 deepseek-v4-flash |
 | 本地存储 | Preferences（设置、历史、班级名单、免责声明状态） |
-| 文档能力 | 自研 OOXML 导出（Word）、ExcelJS 读写（xlsx）、jszip 解析（docx） |
+| 文档能力 | 自研 OOXML 导出（Word、PPT 骨架模板）、ExcelJS 读写（xlsx）、jszip 解析（docx） |
 | 多语言 | I18n 五词典（zh/en/ug/bo/mn）＋按语言切换的内置字体 |
 | 第三方依赖 | @archermind/exceljs、@ohos/jszip |
 
-AI 请求采用非流式单次请求以保障稳定性：禁用思考链缩短等待时间、超时自动重试最多 3 次、对“HTTP 200 但内容异常 / 长度截断”给出明确错误提示。界面内置自研 Markdown 渲染组件，支持标题、列表、表格、代码块等块级语法。
+AI 请求采用服务端 SSE 流式输出（客户端自研 `SseClient.ets` 处理；流程：提交任务 → 订阅 feed 接收 open/chunk/done 事件），失败时自动回退到任务轮询兜底（每 2 秒轮询一次、最多 450 次），App 被杀后重启会自动恢复未完成任务；对“HTTP 200 但内容异常 / 长度截断”给出明确错误提示。界面内置自研 Markdown 渲染组件，支持标题、列表、表格、代码块等块级语法。
 
 ## 目录结构
 

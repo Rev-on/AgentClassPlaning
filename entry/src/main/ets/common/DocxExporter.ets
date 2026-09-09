@@ -54,7 +54,7 @@ export class DocxExporter {
     const savePicker = new picker.DocumentViewPicker(context);
     const saveOptions = new picker.DocumentSaveOptions();
     saveOptions.newFileNames = [fileName];
-    saveOptions.fileSuffixChoices = ['.docx'];
+    // ArkUI-X 跨端：不设置 fileSuffixChoices（Android 侧不支持，后缀由系统按文件名扩展名处理）
     const saveResult = await savePicker.save(saveOptions);
     if (saveResult.length === 0) {
       return;

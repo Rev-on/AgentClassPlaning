@@ -14,6 +14,7 @@ import { GenTask } from '../common/GenTask';
 import { Greeting } from '../common/Greeting';
 import { ResultBus } from '../common/ResultBus';
 import { DuoDetect } from '../common/DuoDetect';
+import { Duo2in1 } from '../common/Duo2in1';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
 import { IndexWide } from './IndexWide';
 import { IndexWideDuo } from './IndexWideDuo';
@@ -324,17 +325,7 @@ struct Index {
 
   /** 主窗口是否已真正跨轴铺满上下两屏（用窗口实际矩形与上屏高度比对，避免误判） */
   private isSpanned(mw: window.Window): boolean {
-    try {
-      const up = display.getDisplayByIdSync(0);
-      if (up === undefined) {
-        return false;
-      }
-      const r = mw.getWindowProperties().windowRect;
-      // 铺满后窗口高度 ≈ 上屏+折痕+下屏，远大于单上屏高度
-      return r.height > up.height + 100;
-    } catch (e) {
-      return false;
-    }
+    return Duo2in1.isAcrossSpan(mw);
   }
 
   /** 未铺满时触发一次跨轴最大化（busy 去重） */
@@ -397,12 +388,16 @@ struct Index {
     this.spanBusy = true;
     try {
       // acrossDisplay=true：半折叠态下主窗口进入瀑布模式（铺满上下两屏，结果面板真正落到物理下半屏）
-      mw.maximize(window.MaximizePresentation.ENTER_IMMERSIVE, true).then(() => {
+      Duo2in1.enterFold(mw).then((ok: boolean): void => {
         this.spanBusy = false;
-        this.spanDone = this.isSpanned(mw);
+        if (ok) {
+          this.spanDone = this.isSpanned(mw);
+        } else {
+          // 形态/下屏可能尚未就绪，稍后由看门狗重试
+          setTimeout(() => this.trySpanFold(attempt + 1), 350);
+        }
       }).catch(() => {
         this.spanBusy = false;
-        // 形态/下屏可能尚未就绪，稍后由看门狗重试
         setTimeout(() => this.trySpanFold(attempt + 1), 350);
       });
     } catch (e) {
@@ -417,13 +412,7 @@ struct Index {
     if (mw === undefined) {
       return;
     }
-    try {
-      mw.restore().catch(() => {
-        // 恢复失败时保持现状
-      });
-    } catch (e) {
-      // 恢复失败时保持现状
-    }
+    Duo2in1.collapseFold(mw);
   }
 
   /** 按当前窗口尺寸立即刷新一次两栏判定 */

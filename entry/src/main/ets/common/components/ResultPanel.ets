@@ -22,33 +22,57 @@ const FONT_COLORS: string[] = ['#E5484D', '#E8930C', '#30A46C', '#0091FF', '#6E5
 
 /**
  * RichEditor 回读的样式判定工具：
- * fontWeight/fontStyle/decoration 返回的是"枚举序号"而非语义值
- * （如 Bold 的序号可能为 3/4，而非 700），需同时兼容语义权重与序号两种形态，
+ * fontWeight/fontStyle/decoration 返回的是"枚举序号/语义值"两种形态之一
+ * （FontWeight 枚举：Lighter0 Normal1 Regular2 Medium3 Bold4 Bolder5；也可能回读 400/700 等语义数值；
+ *   个别版本会回读字符串 'bold'/'400'），这里全形态兼容，
  * 否则加粗等样式会被误判为"未开启"（导致无法取消加粗、保存/导出丢失样式）。
  */
-function isBoldWeightOf(w: number): boolean {
+function isBoldWeightOf(w: number | string | undefined): boolean {
+  if (w === undefined) {
+    return false;
+  }
+  if (typeof w === 'string') {
+    const low: string = w.toLowerCase();
+    if (low === 'bold' || low === 'bolder' || low === 'medium' || low === 'semibold') {
+      return true;
+    }
+    const num: number = Number(low);
+    if (!isNaN(num)) {
+      return num >= 600;
+    }
+    return false;
+  }
+  // 枚举序号：Medium3/Bold4/Bolder5 均视为"加粗档"；语义数值：600~900
   if (w >= 600) {
     return true;
   }
-  return w === FontWeight.Bold || w === FontWeight.Medium;
+  return w === FontWeight.Medium || w === FontWeight.Bold || w === FontWeight.Bolder;
 }
 
-function isItalicStyleOf(fs: FontStyle): boolean {
+function isItalicStyleOf(fs: FontStyle | string | undefined): boolean {
+  if (fs === undefined) {
+    return false;
+  }
+  if (typeof fs === 'string') {
+    return fs.toLowerCase() === 'italic';
+  }
   return fs === FontStyle.Italic;
 }
 
 function isUnderlineOf(d: DecorationStyleResult | undefined): boolean {
-  if (d === undefined) {
+  if (d === undefined || d.type === undefined) {
     return false;
   }
-  return d.type === TextDecorationType.Underline || (d.type as number) === 1;
+  const t: number = d.type as number;
+  return t === TextDecorationType.Underline || t === 1;
 }
 
 function isStrikeOf(d: DecorationStyleResult | undefined): boolean {
-  if (d === undefined) {
+  if (d === undefined || d.type === undefined) {
     return false;
   }
-  return d.type === TextDecorationType.LineThrough || (d.type as number) === 3;
+  const t: number = d.type as number;
+  return t === TextDecorationType.LineThrough || t === 3;
 }
 
 @Component
@@ -91,6 +115,8 @@ export struct ResultPanel {
   private rc: RichEditorController = new RichEditorController();
   private selStart: number = -1;
   private selEnd: number = -1;
+  /** 本次编辑会话是否做过样式/颜色操作（未操作且文本未变时，保存直接回写原文，避免 SDK 回读抖动剥除整篇样式） */
+  private editedFlag: boolean = false;
   /** 选区样式快照：在 onSelect 时计算（点击工具栏按钮后选区可能被系统收起，不能用实时选区判断 toggle） */
   private selBold: boolean = false;
   private selItalic: boolean = false;
@@ -220,6 +246,7 @@ export struct ResultPanel {
     this.showColors = false;
     this.selStart = -1;
     this.selEnd = -1;
+    this.editedFlag = false;
     this.refreshTopInset();
     this.editing = true;
   }
@@ -238,7 +265,7 @@ export struct ResultPanel {
         const run: RichRun = runs[i];
         const st: RichEditorTextStyle = {};
         if (run.bold || run.heading > 0) {
-          st.fontWeight = 'bold';
+          st.fontWeight = FontWeight.Bold;
         }
         if (run.italic) {
           st.fontStyle = FontStyle.Italic;
@@ -307,6 +334,26 @@ export struct ResultPanel {
   private readHtml(): string {
     if (!this.editorReady) {
       return this.result;
+    }
+    // 无任何样式/颜色操作且文本与原文一致（含"打开即退出"）时直接回写原文，
+    // 避免依赖 SDK 回读把原本正确的样式整篇剥成纯文本
+    if (!this.editedFlag) {
+      let plainNow: string = '';
+      try {
+        const spans = this.rc.getSpans();
+        for (let i: number = 0; i < spans.length; i++) {
+          const sp = spans[i];
+          const mayText: RichEditorTextSpanResult = sp as RichEditorTextSpanResult;
+          if (mayText.value !== undefined) {
+            plainNow += mayText.value;
+          }
+        }
+      } catch (e) {
+        plainNow = '';
+      }
+      if (plainNow === RichHtml.toPlain(this.result)) {
+        return this.result;
+      }
     }
     try {
       const spans = this.rc.getSpans();
@@ -377,7 +424,7 @@ export struct ResultPanel {
     const on: boolean = !this.selStyleOn(kind);
     const st: RichEditorTextStyle = {};
     if (kind === 'bold') {
-      st.fontWeight = on ? 'bold' : 400;
+      st.fontWeight = on ? FontWeight.Bold : FontWeight.Regular;
     } else if (kind === 'italic') {
       st.fontStyle = on ? FontStyle.Italic : FontStyle.Normal;
     } else if (kind === 'underline') {
@@ -385,6 +432,7 @@ export struct ResultPanel {
     } else if (kind === 'strike') {
       st.decoration = { type: on ? TextDecorationType.LineThrough : TextDecorationType.None };
     }
+    this.editedFlag = true;
     this.updateRange(st);
     this.flipSelStyle(kind, on);
   }
@@ -397,6 +445,7 @@ export struct ResultPanel {
     }
     const st: RichEditorTextStyle = {};
     st.fontColor = colorHex === '' ? '#1B1B1F' : colorHex;
+    this.editedFlag = true;
     this.updateRange(st);
   }
 
@@ -752,11 +801,20 @@ export struct ResultPanel {
   }
 
   /** 课件大纲：按需渲染幻灯片框架；JSON 无法解析时回退富文本显示原文 */
+  private slidesNow(): CourseSlide[] {
+    const s: CourseSlide[] | null = PptxExporter.parseSlides(this.result);
+    if (s !== null && s.length > 0) {
+      return s;
+    }
+    const empty: CourseSlide[] = [];
+    return empty;
+  }
+
+  /** 课件大纲：按需渲染幻灯片框架；JSON 无法解析时回退富文本显示原文 */
   @Builder
   slideContent() {
-    const slides: CourseSlide[] | null = PptxExporter.parseSlides(this.result);
-    if (slides !== null && slides.length > 0) {
-      this.slidesPreview(slides)
+    if (this.slidesNow().length > 0) {
+      this.slidesPreview(this.slidesNow())
     } else {
       RichBox({ html: this.result })
         .width('100%')

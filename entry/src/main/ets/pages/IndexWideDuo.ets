@@ -6,8 +6,8 @@
  */
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
-import display from '@ohos.display';
 import { FoldSplitContainer } from '@kit.ArkUI';
+import { Duo2in1 } from '../common/Duo2in1';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
@@ -267,28 +267,12 @@ export struct IndexWideDuo {
 
   /** 上半屏（displayId=0）显示区域高度（vp）：双屏形态下工具区精确占满上屏 */
   private screenTopVp(): number {
-    try {
-      const up = display.getDisplayByIdSync(0);
-      return px2vp(up.height);
-    } catch (e) {
-      return 0;
-    }
+    return Duo2in1.topHeightVp();
   }
 
   /** 折痕区高度（vp）：上下屏之间的物理缝隙，内容需要避让 */
   private creaseVp(): number {
-    try {
-      const r = display.getCurrentFoldCreaseRegion();
-      if (r !== undefined && r.creaseRects !== undefined && r.creaseRects.length > 0) {
-        const h: number = r.creaseRects[0].height;
-        if (h > 0) {
-          return px2vp(h);
-        }
-      }
-    } catch (e) {
-      // 无法获取折痕区域时按无折痕处理
-    }
-    return 0;
+    return Duo2in1.creaseVp();
   }
 
   /** 卡片图标底色（与手机首页卡片一致） */

@@ -11,6 +11,7 @@ import { GenTask } from './GenTask';
 import { HistoryStore } from './HistoryStore';
 import { ResultBus } from './ResultBus';
 import { GenSession } from './GenSession';
+import { SseClient, SseEvent, SseListener } from './SseClient';
 
 /** 对话消息 */
 interface ChatMessage {
@@ -64,6 +65,12 @@ interface ChatResponse {
 /** 任务模式控制信息：记录任务是否已被服务端接受（提交成功） */
 interface TaskCtl {
   accepted: boolean;
+}
+
+/** 任务 feed 订阅结果 */
+interface FeedResult {
+  final: boolean;
+  content: string;
 }
 
 export class AiService {
@@ -176,37 +183,38 @@ export class AiService {
   }
 
   /**
-   * 后台任务模式：提交到服务端任务队列 -> 发布"生成中"通知 -> 轮询结果。
-   * 页面销毁后（gone()=true）不再回调 UI，改为静默保存历史并更新通知；进程被杀则完全依赖服务端完成与推送。
+   * 后台任务模式：提交到服务端任务队列 -> 优先订阅 SSE feed 边生成边回调 -> 兜底轮询。
+   * 页面销毁后（gone()=true）不订阅 feed，改为轮询静默入库；进程被杀则下次启动由 recover 静默接管。
    */
   private static async chatByTask(systemPrompt: string, userPrompt: string, skipNote: boolean,
     onDelta: ((partial: string) => void) | undefined, opts: AiTaskOpts, ctl: TaskCtl): Promise<string> {
-    const seed: number = GenTask.nextSeed();
-    const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt, seed);
+    const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt);
     // 提交成功：服务端已接受任务并开始生成，此后任何任务态失败都不应回退直连重发
     ctl.accepted = true;
-    // 生成中反馈：实况窗（PROGRESS 进度）优先，不可用回退常驻"生成中"通知
-    const lvOk: boolean = await GenTask.publishRunning(opts.ctx, seed, opts.label);
-    if (lvOk) {
-      await GenTask.reportLive(taskId, seed); // 通知服务端：完成后推送结束消息清理实况窗
-    }
-    await GenTask.markRunningMode(opts.ctx, lvOk); // 记录反馈模式：实况窗免重建；普通通知需常驻/可心跳恢复
     let goneFlag: boolean = opts.gone !== undefined ? opts.gone() : false;
+    // ---- 流式阶段：页面存活且需要增量展示时才订阅 feed；失败/断开自动退回轮询 ----
+    if (!goneFlag && onDelta !== undefined) {
+      const feed = await AiService.feedOnce(taskId, onDelta);
+      if (feed.final) {
+        await GenTask.clearPending(opts.ctx);
+        const left: boolean = opts.gone !== undefined ? opts.gone() : false;
+        if (left && feed.content !== '') {
+          // 页面在流式过程中离开：结果静默入库，避免丢失
+          await HistoryStore.autoAdd(opts.ctx, {
+            type: opts.label,
+            title: opts.label,
+            content: feed.content,
+            time: HistoryStore.formatNow()
+          });
+        }
+        return AiService.withAiNote(feed.content, skipNote);
+      }
+      goneFlag = opts.gone !== undefined ? opts.gone() : false;
+    }
     const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms));
     for (let i: number = 0; i < GenTask.POLL_MAX; i++) {
       await sleep(GenTask.POLL_MS);
       goneFlag = opts.gone !== undefined ? opts.gone() : false;
-      // 每约 10 秒一次：实况窗模式在页面存活时推进进度；
-      // 普通通知模式心跳重建（被清除立即恢复），常驻效果覆盖离开页面后进程仍存活的轮询阶段
-      if (i % 5 === 0 && i < 200) {
-        if (lvOk && !goneFlag) {
-          const seq: number = 2 + Math.floor(i / 5);
-          const prog: number = 12 + i * 3;
-          await GenTask.updateProgress(seed, opts.label, seq, prog);
-        } else if (!lvOk) {
-          await GenTask.refreshRunning(seed, opts.label);
-        }
-      }
       let content: string = '';
       let status: string = '';
       try {
@@ -220,11 +228,7 @@ export class AiService {
         continue; // 网络抖动：跳过本轮继续轮询
       }
       if (status === 'done') {
-        await GenTask.publishResult(seed, opts.label, true);
         await GenTask.clearPending(opts.ctx);
-        if (lvOk) {
-          await GenTask.stopLiveLocal(seed, opts.label);
-        }
         if (goneFlag) {
           // 页面已离开：结果静默入库，避免丢失
           if (content !== '') {
@@ -241,11 +245,7 @@ export class AiService {
         return AiService.withAiNote(content, skipNote);
       }
       if (status === 'failed') {
-        await GenTask.publishResult(seed, opts.label, false);
         await GenTask.clearPending(opts.ctx);
-        if (lvOk) {
-          await GenTask.stopLiveLocal(seed, opts.label);
-        }
         let msg: string = 'AI 生成失败，请稍后重试';
         try {
           const t2 = await GenTask.fetchTask(taskId);
@@ -258,8 +258,91 @@ export class AiService {
         throw new Error(msg);
       }
     }
-    // 轮询超时：保留任务与"生成中"通知，下次进入 App 时由 recover 接管
-    throw new Error('AI 生成较慢，请稍后在通知或历史中查看结果');
+    // 轮询超时：保留任务与 pending，下次进入 App 时由 recover 静默接管
+    throw new Error('AI 生成较慢，请稍后到历史记录中查看结果');
+  }
+
+  /**
+   * 订阅服务端任务 feed（SSE）：
+   * chunk 增量拼接后回调 onDelta（整段进度文本）；done 事件返回权威完整内容。
+   * 任何断线/异常/停滞（30s 无数据）都按 final=false 返回，由调用方退回轮询，绝不悬挂。
+   */
+  private static async feedOnce(taskId: string,
+    onDelta: (partial: string) => void): Promise<FeedResult> {
+    return new Promise<FeedResult>((resolve) => {
+      let acc: string = '';
+      let settled: boolean = false;
+      let stallTimer: number = -1;
+      let cl: SseClient | null = null;
+      const settle = (final: boolean, content: string): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (stallTimer !== -1) {
+          clearTimeout(stallTimer);
+          stallTimer = -1;
+        }
+        if (cl !== null) {
+          cl.close();
+          cl = null;
+        }
+        const fr: FeedResult = { final: final, content: content };
+        resolve(fr);
+      };
+      const touch = (): void => {
+        if (stallTimer !== -1) {
+          clearTimeout(stallTimer);
+        }
+        stallTimer = setTimeout(() => {
+          settle(false, '');
+        }, 30000);
+      };
+      const listener: SseListener = {
+        onEvent: (evt: SseEvent): void => {
+          touch();
+          const payload: string = evt.payload;
+          let obj: Record<string, Object> | null = null;
+          if (payload !== '') {
+            try {
+              obj = JSON.parse(payload) as Record<string, Object>;
+            } catch (e) {
+              obj = null;
+            }
+          }
+          if (evt.event === 'chunk') {
+            const d: string = obj !== null && obj['d'] !== undefined ? String(obj['d']) : '';
+            if (d !== '') {
+              acc += d;
+              onDelta(acc);
+            }
+          } else if (evt.event === 'done') {
+            const c: string = obj !== null && obj['c'] !== undefined && String(obj['c']) !== ''
+              ? String(obj['c']) : acc;
+            settle(true, c);
+          } else if (evt.event === 'error' || evt.event === 'cancelled') {
+            settle(false, ''); // 交给轮询兜底读取失败/取消详情
+          }
+        },
+        onEnd: (): void => {
+          settle(false, '');
+        },
+        onError: (msg: string): void => {
+          void msg;
+          settle(false, '');
+        }
+      };
+      cl = new SseClient(listener);
+      const sse: SseClient = cl;
+      sse.open('/task/' + taskId + '/feed').then((code: number): void => {
+        if (code !== 200) {
+          settle(false, '');
+        }
+      }).catch(() => {
+        settle(false, '');
+      });
+      touch();
+    });
   }
 
   /** 在生成内容末尾追加"AI 生成"标注（软件层统一生效，课件 JSON 除外）；内容为富文本 HTML */

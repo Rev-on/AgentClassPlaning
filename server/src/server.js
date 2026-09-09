@@ -24,6 +24,9 @@ const https = require('https');
 const tasks = require('./tasks');
 const push = require('./push');
 
+/** 消息推送总开关：客户端已取消通知/推送功能，默认关闭；如需重新启用设环境变量 PUSH_ENABLED=1 */
+const PUSH_ENABLED = process.env.PUSH_ENABLED === '1';
+
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 // TLS 配置：证书文件存在（或用 SSL_CERT/SSL_KEY 覆盖路径）即自动启用 HTTPS 监听 PORT
@@ -233,7 +236,156 @@ async function fetchDeepSeek(system, user) {
   }
 }
 
-/** 串行执行一个任务：生成 -> 保存 -> 推送完成/失败通知 */
+/* ===================== 任务流式输出（SSE feed） ===================== */
+/** taskId -> { ctrl: AbortController, manual: boolean }（取消任务用） */
+const taskAborters = new Map();
+/** taskId -> Set<res>（feed 订阅连接） */
+const feedSubs = new Map();
+
+function feedSend(taskId, event, obj) {
+  const subs = feedSubs.get(taskId);
+  if (!subs) {
+    return;
+  }
+  const line = 'event: ' + event + '\ndata: ' + JSON.stringify(obj) + '\n\n';
+  for (const res of subs) {
+    try {
+      res.write(line);
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
+/** 任务结束：结束所有 feed 连接并清理状态 */
+function feedClose(taskId) {
+  const subs = feedSubs.get(taskId);
+  if (subs) {
+    for (const res of subs) {
+      try {
+        res.end();
+      } catch (e) {
+        // ignore
+      }
+    }
+    feedSubs.delete(taskId);
+  }
+  taskAborters.delete(taskId);
+}
+
+/** 流式调用 DeepSeek：完整返回全文，同时把每个增量片段回调 onDelta（可被 cancel 中断） */
+async function fetchDeepSeekStreamed(task, onDelta) {
+  if (!API_KEY) {
+    throw new Error('服务端未配置 DEEPSEEK_API_KEY');
+  }
+  const ab = { ctrl: new AbortController(), manual: false };
+  taskAborters.set(task.id, ab);
+  const timer = setTimeout(() => {
+    if (!ab.manual) {
+      ab.ctrl.abort();
+    }
+  }, TIMEOUT_MS);
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  let full = '';
+  let prev = 0;
+  const flushRemain = () => {
+    if (full.length > prev) {
+      const piece = full.slice(prev);
+      prev = full.length;
+      onDelta(piece);
+    }
+  };
+  try {
+    const messages = [];
+    if (task.system && String(task.system).trim() !== '') {
+      messages.push({ role: 'system', content: task.system });
+    }
+    messages.push({ role: 'user', content: task.user });
+    const resp = await fetch(UPSTREAM, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + API_KEY
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: messages,
+        stream: true,
+        thinking: { type: 'disabled' }
+      }),
+      signal: ab.ctrl.signal
+    });
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error('上游返回 ' + resp.status + ': ' + String(t).slice(0, 200));
+    }
+    if (!resp.body) {
+      throw new Error('上游未返回流式内容');
+    }
+    const reader = resp.body.getReader();
+    const flushTimer = setInterval(flushRemain, 150);
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (!value || value.length === 0) {
+          continue;
+        }
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const ev = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const lines = ev.split('\n');
+          for (const ln of lines) {
+            if (!ln.startsWith('data:')) {
+              continue;
+            }
+            const data = ln.slice(5).trim();
+            if (data === '' || data === '[DONE]') {
+              continue;
+            }
+            try {
+              const j = JSON.parse(data);
+              const d = j && j.choices && j.choices[0] && j.choices[0].delta &&
+                j.choices[0].delta.content;
+              if (typeof d === 'string') {
+                full += d;
+              }
+            } catch (e) {
+              // 忽略非 JSON 心跳/注释行
+            }
+          }
+        }
+      }
+    } finally {
+      clearInterval(flushTimer);
+    }
+    flushRemain();
+    if (full.trim() === '') {
+      throw new Error('上游未返回内容');
+    }
+    return full;
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      if (ab.manual) {
+        throw new Error('任务已取消');
+      }
+      throw new Error('上游请求超时');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    if (taskAborters.get(task.id) === ab) {
+      taskAborters.delete(task.id);
+    }
+  }
+}
+
+/** 串行执行一个任务：流式生成 -> 保存 -> SSE 广播增量 -> 结束广播 */
 function runTask(taskId) {
   const task = tasks.get(taskId);
   if (!task) {
@@ -242,7 +394,7 @@ function runTask(taskId) {
   tasks.enqueue(async () => {
     tasks.patch(taskId, { status: tasks.STATUS.RUNNING });
     try {
-      const content = await fetchDeepSeek(task.system, task.user);
+      const content = await fetchDeepSeekStreamed(task, (d) => feedSend(taskId, 'chunk', { d: d }));
       tasks.patch(taskId, {
         status: tasks.STATUS.DONE,
         content: content,
@@ -250,24 +402,28 @@ function runTask(taskId) {
         error: ''
       });
       console.log('[tasks] done id=' + taskId + ' type=' + task.type + ' len=' + content.length);
-      // 若客户端创建过实况窗，先经 Push Kit 结束"生成中"实况窗（进程被杀也能结束）
-      if (task.liveView) {
-        await push.sendLiveViewEnd({
+      feedSend(taskId, 'done', { c: content });
+      feedClose(taskId);
+      // 完成通知（默认关闭：客户端已取消消息通知功能；仅当 PUSH_ENABLED=1 时启用）
+      if (PUSH_ENABLED) {
+        if (task.liveView) {
+          await push.sendLiveViewEnd({
+            token: tasks.tokenOf(task.deviceId),
+            activityId: task.liveView.activityId,
+            event: task.liveView.event || 'PROGRESS'
+          }).catch((e) => console.error('[tasks] liveview end 失败: ' + String(e && e.message || e)));
+        }
+        await push.sendAlert({
           token: tasks.tokenOf(task.deviceId),
-          activityId: task.liveView.activityId,
-          event: task.liveView.event || 'PROGRESS'
-        }).catch((e) => console.error('[tasks] liveview end 失败: ' + String(e && e.message || e)));
+          notifyId: task.notifySeed,
+          title: task.notifyTitle,
+          body: task.notifyBody,
+          data: { taskId: taskId, type: task.type, status: 'done' }
+        }).catch((e) => console.error('[tasks] push done 失败: ' + String(e && e.message || e)));
       }
-      // 完成通知：notifyId 与客户端"生成中"通知一致 -> 覆盖
-      await push.sendAlert({
-        token: tasks.tokenOf(task.deviceId),
-        notifyId: task.notifySeed,
-        title: task.notifyTitle,
-        body: task.notifyBody,
-        data: { taskId: taskId, type: task.type, status: 'done' }
-      }).catch((e) => console.error('[tasks] push done 失败: ' + String(e && e.message || e)));
     } catch (e) {
       const msg = e && e.message ? String(e.message) : '生成失败';
+      const cancelled = msg === '任务已取消';
       tasks.patch(taskId, {
         status: tasks.STATUS.FAILED,
         content: '',
@@ -275,16 +431,87 @@ function runTask(taskId) {
         error: msg
       });
       console.error('[tasks] failed id=' + taskId + ' err=' + msg);
-      await push.sendAlert({
-        token: tasks.tokenOf(task.deviceId),
-        notifyId: task.notifySeed,
-        title: task.notifyFailTitle,
-        body: task.notifyFailBody,
-        data: { taskId: taskId, type: task.type, status: 'failed' }
-      }).catch((e) => console.error('[tasks] push fail 失败: ' + String(e && e.message || e)));
+      feedSend(taskId, cancelled ? 'cancelled' : 'error', { m: msg });
+      feedClose(taskId);
+      if (PUSH_ENABLED) {
+        await push.sendAlert({
+          token: tasks.tokenOf(task.deviceId),
+          notifyId: task.notifySeed,
+          title: task.notifyFailTitle,
+          body: task.notifyFailBody,
+          data: { taskId: taskId, type: task.type, status: 'failed' }
+        }).catch((e) => console.error('[tasks] push fail 失败: ' + String(e && e.message || e)));
+      }
     }
   }).catch((e) => console.error('[tasks] task error: ' + (e && e.message ? e.message : String(e))));
 }
+
+// 任务增量订阅（SSE 流）：生成中推送 chunk，结束推送 done/error/cancelled
+app.get('/api/task/:id/feed', checkToken, (req, res) => {
+  const id = req.params.id;
+  const t = tasks.get(id);
+  if (!t) {
+    res.status(404).json({ error: { message: '任务不存在' } });
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  if (t.status === tasks.STATUS.DONE) {
+    res.write('event: done\ndata: ' + JSON.stringify({ c: t.content || '' }) + '\n\n');
+    res.end();
+    return;
+  }
+  if (t.status === tasks.STATUS.FAILED) {
+    res.write('event: error\ndata: ' + JSON.stringify({ m: t.error || '生成失败' }) + '\n\n');
+    res.end();
+    return;
+  }
+  res.write('event: open\ndata: {}\n\n');
+  let subs = feedSubs.get(id);
+  if (!subs) {
+    subs = new Set();
+    feedSubs.set(id, subs);
+  }
+  subs.add(res);
+  const hb = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+    } catch (e) {
+      clearInterval(hb);
+    }
+  }, 15000);
+  res.on('close', () => {
+    clearInterval(hb);
+    if (subs) {
+      subs.delete(res);
+      if (subs.size === 0) {
+        feedSubs.delete(id);
+      }
+    }
+  });
+});
+
+// 手动取消正在生成的任务（中断上游请求，任务标记失败"任务已取消"）
+app.post('/api/task/:id/cancel', checkToken, (req, res) => {
+  const id = req.params.id;
+  const ab = taskAborters.get(id);
+  if (ab) {
+    ab.manual = true;
+    ab.ctrl.abort();
+    res.json({ ok: true });
+    return;
+  }
+  const t = tasks.get(id);
+  if (!t) {
+    res.status(404).json({ error: { message: '任务不存在' } });
+    return;
+  }
+  res.json({ ok: true, status: t.status }); // 任务已结束，无需取消
+});
 
 // 提交后台生成任务（立即返回 taskId；生成在服务端按并发队列执行）
 app.post('/api/task', checkToken, (req, res) => {

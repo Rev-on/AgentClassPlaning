@@ -73,6 +73,16 @@ export class RichHtml {
     return '<p><font size="' + RichHtml.VIEW_SIZE + '">' + lines.join('<br>') + '</font></p>';
   }
 
+  /** 流式预览清洗：截掉末尾尚未闭合的标签片段（如 "<h3>一、教" 中的 "<h3>" 残段），避免把残缺标签当文本显示 */
+  static liveSafe(html: string): string {
+    const lt: number = html.lastIndexOf('<');
+    const gt: number = html.lastIndexOf('>');
+    if (lt > gt) {
+      return html.substring(0, lt);
+    }
+    return html;
+  }
+
   /** 提取纯文本（复制到剪贴板等场景）：剥标签 + 还原常见实体 + 换行归一 */
   static toPlain(html: string): string {
     let s: string = html;

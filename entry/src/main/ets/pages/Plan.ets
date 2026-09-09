@@ -13,6 +13,8 @@ import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
+import { RichBox } from '../common/components/RichBox';
+import { RichHtml } from '../common/RichHtml';
 
 @Component
 export struct PlanContent {
@@ -262,11 +264,38 @@ export struct PlanContent {
       if (this.bottomResult) {
         // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
       } else if (this.loading) {
-        Row({ space: 10 }) {
-          LoadingProgress().width(26).height(26).color('#4A90D9')
-          Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
-            .fontFamily(AppFonts.family())
-        }.width('100%').justifyContent(FlexAlign.Center).padding(20)
+        if (this.result !== '') {
+          // 流式输出中：实时展示已生成内容（清洗未闭合标签，滚动阅读）
+          Column() {
+            Row({ space: 6 }) {
+              LoadingProgress().width(14).height(14).color('#4A90D9')
+              Text(this.t('gen.streaming'))
+                .fontFamily(AppFonts.family())
+                .fontSize(12)
+                .fontColor(this.col('sub'))
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Start)
+            .padding({ bottom: 8 })
+            Scroll() {
+              RichBox({ html: RichHtml.liveSafe(this.result) })
+                .width('100%')
+            }
+            .width('100%')
+            .layoutWeight(1)
+            .scrollBar(BarState.Off)
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .padding(16)
+          .alignItems(HorizontalAlign.Start)
+        } else {
+          Row({ space: 10 }) {
+            LoadingProgress().width(26).height(26).color('#4A90D9')
+            Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+              .fontFamily(AppFonts.family())
+          }.width('100%').justifyContent(FlexAlign.Center).padding(20)
+        }
       } else if (this.result !== '') {
         ResultPanel({
           result: this.result,
