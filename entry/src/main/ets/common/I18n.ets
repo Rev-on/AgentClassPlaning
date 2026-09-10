@@ -782,6 +782,26 @@ export class I18n {
     return raw;
   }
 
+  /** 语言清单：顺序即设置页语言选择框的展示顺序 */
+  static readonly LANG_CODES: string[] = ['zh', 'en', 'ug', 'bo', 'mn'];
+
+  /** 语言自身的名称：固定用该语言本身书写，不随界面语言变化（如 简体中文 / English / ئۇيغۇرچە） */
+  static langSelf(code: string): string {
+    if (code === 'en') {
+      return 'English';
+    }
+    if (code === 'ug') {
+      return 'ئۇيغۇرچە';
+    }
+    if (code === 'bo') {
+      return 'བོད་སྐད།';
+    }
+    if (code === 'mn') {
+      return 'ᠮᠣᠩᠭᠣᠯ ᠬᠡᠯᠡ';
+    }
+    return '简体中文';
+  }
+
   /** 按 key 取当前语言文本；少数民族语言缺词时回退中文 */
   static t(key: string): string {
     const lang: string = I18n.currentLang();

@@ -15,9 +15,8 @@ export class AppFonts {
   /** 其余语言使用系统默认字体 */
   static readonly DEFAULT: string = 'HarmonyOS Sans';
 
-  /** 按当前界面语言返回应使用的字体族 */
-  static family(): string {
-    const lang: string | undefined = AppStorage.get<string>('appLang');
+  /** 按指定语言返回字体族（用于语言选择框这类多语言混排场景，逐项取各自字体） */
+  static forLang(lang: string): string {
     if (lang === 'bo') {
       return AppFonts.TIBETAN;
     }
@@ -28,6 +27,12 @@ export class AppFonts {
       return AppFonts.MONGOLIAN;
     }
     return AppFonts.DEFAULT;
+  }
+
+  /** 按当前界面语言返回应使用的字体族 */
+  static family(): string {
+    const lang: string | undefined = AppStorage.get<string>('appLang');
+    return AppFonts.forLang(lang === undefined ? 'zh' : lang);
   }
 
   /** 是否处于少数民族语言界面（需要内置字体） */

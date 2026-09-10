@@ -64,20 +64,36 @@ export struct SettingsContent {
     AppStorage.setOrCreate('revFontsReg', true);
   }
 
-  /** 支持的语言代码（顺序与下拉选项一致） */
-  private langCodes(): string[] {
-    return ['zh', 'en', 'ug', 'bo', 'mn'];
-  }
-
-  /** 语言下拉选项（按当前界面语言显示各语言的名称） */
-  private langOptions(): SelectOption[] {
-    const codes: string[] = this.langCodes();
-    const opts: SelectOption[] = [];
-    for (let i = 0; i < codes.length; i++) {
-      const opt: SelectOption = { value: this.t('langName.' + codes[i]) };
-      opts.push(opt);
+  /** 语言选择菜单：每项固定用该语言自身名称书写，并使用该语言自带字体（避免多语言混排缺字） */
+  @Builder
+  langMenu() {
+    Column() {
+      ForEach(I18n.LANG_CODES, (code: string) => {
+        Row({ space: 10 }) {
+          Text(I18n.langSelf(code))
+            .fontFamily(AppFonts.forLang(code))
+            .fontSize(15)
+            .fontColor(code === this.appLang ? '#4A90D9' : this.col('text'))
+            .layoutWeight(1)
+            .textAlign(TextAlign.Start)
+          if (code === this.appLang) {
+            Text('✓')
+              .fontSize(13)
+              .fontColor('#4A90D9')
+          }
+        }
+        .width(200)
+        .height(44)
+        .padding({ left: 16, right: 16 })
+        .onClick(() => {
+          this.switchLang(code);
+        })
+      }, (code: string) => code)
     }
-    return opts;
+    .width(200)
+    .padding({ top: 6, bottom: 6 })
+    .backgroundColor(this.col('card'))
+    .borderRadius(12)
   }
 
   /** 主题下拉选项 */
@@ -87,11 +103,6 @@ export struct SettingsContent {
       { value: this.t('set.themeDark') },
       { value: this.t('set.themeSystem') }
     ];
-  }
-
-  private langIndex(): number {
-    const idx: number = this.langCodes().indexOf(this.appLang);
-    return idx >= 0 ? idx : 0;
   }
 
   private themeIndex(): number {
@@ -111,7 +122,8 @@ export struct SettingsContent {
     }
     const ctx = getContext(this) as common.UIAbilityContext;
     AppSettings.saveLang(ctx, lang).then(() => {
-      const langName: string = I18n.t('langName.' + lang);
+      // 提示里的语言名同样用该语言自身名称，避免"切到维吾尔语后提示里写维吾尔语"这类混排
+      const langName: string = I18n.langSelf(lang);
       promptAction.showToast({ message: I18n.t('toast.lang').replace('{lang}', langName) });
     });
   }
@@ -209,16 +221,27 @@ export struct SettingsContent {
               .fontSize(13)
               .fontColor(this.col('sub'))
               .width('100%')
-            Select(this.langOptions())
-              .selected(this.langIndex())
-              .value(this.langOptions()[this.langIndex()].value as string)
-              .fontColor(this.col('text'))
-              .selectedOptionFontColor('#4A90D9')
-              .width('100%')
-              .onSelect((index: number) => {
-                const codes: string[] = this.langCodes();
-                this.switchLang(codes[index]);
-              })
+            // 语言名固定用该语言自身书写，故不用 Select（其字体无法逐项区分），改用自绘菜单
+            Row({ space: 8 }) {
+              Text(I18n.langSelf(this.appLang))
+                .fontFamily(AppFonts.forLang(this.appLang))
+                .fontSize(15)
+                .fontColor(this.col('text'))
+                .layoutWeight(1)
+                .textAlign(TextAlign.Start)
+              Text('▾')
+                .fontSize(12)
+                .fontColor(this.col('hint'))
+            }
+            .width('100%')
+            .height(42)
+            .padding({ left: 12, right: 12 })
+            .borderRadius(8)
+            .backgroundColor(this.col('inputBg'))
+            .onClick(() => {
+              // 菜单由 bindMenu 弹出（见下）
+            })
+            .bindMenu(this.langMenu())
           }
           .width('100%')
           .padding(16)
