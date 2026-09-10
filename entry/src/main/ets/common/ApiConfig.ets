@@ -15,8 +15,8 @@ export class ApiConfig {
   static readonly SERVER_BASE_URL: string = 'https://rev-on.site:3000/api';
   /** 代理共享令牌（与服务器 .env 的 PROXY_TOKEN 一致；服务器未启用则留空） */
   static readonly PROXY_TOKEN: string = '';
-  /** 模型名称：deepseek-v4-flash（性价比高）；如需更强可换 deepseek-v4-pro */
-  static readonly MODEL: string = 'deepseek-v4-flash';
+  /** 模型名称：deepseek-flash（V4.1 Flash，支持图片输入，性价比高） */
+  static readonly MODEL: string = 'deepseek-flash';
   /** 连接超时（毫秒）：短连接超时便于快速失败重试 */
   static readonly CONNECT_TIMEOUT: number = 10000;
   /** 读取超时（毫秒）：长输出留足时间（与 server REQUEST_TIMEOUT_MS 一致），减少中途断流 */

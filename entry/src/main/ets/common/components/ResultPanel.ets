@@ -1004,6 +1004,14 @@ export struct ResultPanel {
     .width('100%')
     .height('100%')
     // 全屏编辑：点击"编辑"后以整窗内容覆盖呈现，编辑区占满整屏
-    .bindContentCover(this.editing, this.editorView(), { backgroundColor: this.col('bg') })
+    .bindContentCover(this.editing, this.editorView(), {
+      backgroundColor: this.col('bg'),
+      // 左滑/点击遮罩想关闭编辑浮层时：不直接关闭，改为弹出"放弃并退出"确认，
+      // 避免误触退出编辑、也避免底层页面被一起弹栈导致生成结果丢失
+      onWillDismiss: (action: DismissContentCoverAction): void => {
+        void action;
+        this.onCloseReq();
+      }
+    })
   }
 }

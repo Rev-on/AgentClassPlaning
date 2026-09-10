@@ -6,12 +6,14 @@ import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
 import { AiService } from '../common/AiService';
 import { GenSession, GenSessionState } from '../common/GenSession';
+import { PageDraft } from '../common/PageDraft';
 import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { AttachBar } from '../common/components/AttachBar';
+import { VoiceRemarkBox } from '../common/components/VoiceRemarkBox';
 import { AttachFile } from '../common/AttachTypes';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
@@ -46,6 +48,8 @@ export struct TalkContent {
     // 离开页面前把当前结果留存到生成会话：再次进入可恢复（编辑界面左滑退出同样不丢）
     if (!this.loading && this.result !== '') {
       GenSession.end(this.genKey(), this.result);
+      // 本地草稿兜底：异常退出/进程被杀后重进仍可恢复
+      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), this.result);
     }
     this.leaveGenSession();
         
@@ -56,7 +60,7 @@ export struct TalkContent {
     if (cur !== undefined) {
       if (cur.phase === 'busy' && this.result === '') {
         this.loading = true;
-      } else if (cur.phase === 'done' && this.result === '') {
+      } else if (cur.phase === 'done' && cur.text !== '' && this.result === '') {
         this.result = cur.text;
         this.loading = false;
       }
@@ -67,12 +71,23 @@ export struct TalkContent {
           this.loading = true;
         }
       } else if (s.phase === 'done') {
-        this.result = s.text;
+        // 仅在有内容时回写：避免异常空结果把已显示的预览清空
+        if (s.text !== '') {
+          this.result = s.text;
+        }
         this.loading = false;
       } else {
         this.loading = false;
       }
     });
+
+    // 会话无内容时回退到本地草稿：即使异常退出/进程被杀，重进也能恢复预览
+    if (this.result === '') {
+      const draft: string = PageDraft.load(getContext(this) as common.UIAbilityContext, this.genKey());
+      if (draft !== '') {
+        this.result = draft;
+      }
+    }
   }
 
   private leaveGenSession(): void {
@@ -148,6 +163,8 @@ export struct TalkContent {
     this.stopRequested = false;
     this.loading = true;
     this.result = '';
+    // 开始新的生成：清除旧草稿，避免旧结果回魂
+    PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
     const user: string = `沟通场景：${this.scene()}\n学生情况描述：${this.situation}\n期望语气：${this.tone()}\n\n请生成沟通话术建议。${remarkPart}`;
     try {
@@ -167,6 +184,8 @@ export struct TalkContent {
       }
       this.result = content;
       this.autoSaveHistory(content);
+      // 结果即时落盘草稿：任何异常退出/进程被杀都能恢复
+      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), content);
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
@@ -265,17 +284,13 @@ export struct TalkContent {
           .fontSize(14)
           .onChange((v: string) => { this.situation = v; })
 
-        Text(this.t('label.remark'))
-          .fontFamily(AppFonts.family())
-          .fontSize(12)
-          .fontColor(this.col('hint'))
-          .width('100%')
-        TextInput({ text: this.remark, placeholder: this.t('ph.remark') })
-          .fontFamily(AppFonts.family())
-          .width('100%')
-          .height(42)
-          .fontSize(13)
-          .onChange((v: string) => { this.remark = v; })
+        // 备注（支持语音输入：点击麦克风切换"按住说话"，松手发送，上滑取消）
+        VoiceRemarkBox({
+          text: $remark,
+          disabled: this.loading,
+          labelText: this.t('label.remark'),
+          placeholderText: this.t('ph.remark')
+        })
 
         // 附件：+ 号选择图片/文档/拍照（上限 10）
         AttachBar({ files: $attachFiles, disabled: this.loading })
@@ -353,9 +368,14 @@ export struct TalkContent {
           title: I18n.t('page.talk') + '-' + this.sceneLabel(),
           onSave: () => this.saveToHistory(),
           onEdited: (t: string): void => {
+            if (t.trim() === '') {
+              // 异常空回写保护：避免已有结果被清空导致预览框消失
+              return;
+            }
             this.result = t;
             // 同步到生成会话：离开页面/再次进入时不丢最新内容（含编辑结果）
             GenSession.end(this.genKey(), t);
+            PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), t);
           }
         })
           .layoutWeight(1)

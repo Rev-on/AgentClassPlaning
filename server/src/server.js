@@ -38,7 +38,7 @@ const TLS_ENABLED = process.env.TLS_ENABLED === undefined
 // TLS 开启时可保留的明文端口（平滑迁移用），默认 0 = 不额外监听
 const HTTP_PORT = Number(process.env.HTTP_PORT || 0);
 const UPSTREAM = process.env.UPSTREAM_URL || 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.MODEL || 'deepseek-v4-flash-vision-exp';
+const MODEL = process.env.MODEL || 'deepseek-flash';
 const API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const PROXY_TOKEN = process.env.PROXY_TOKEN || '';
 const TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 600000);
@@ -281,11 +281,35 @@ function normalizeAttachments(raw) {
 
 /**
  * 构造 user 消息内容：
- *  - 无图片 -> 纯文本（正文 + 文档附件解析文本 + 未解析附件说明）
+ *  - 无图片 -> 纯文本（附件使用指令 + 正文 + 文档附件解析文本 + 未解析附件说明）
  *  - 有图片 -> OpenAI 兼容多模态数组（text + image_url 若干），供视觉模型识别
+ *  说明：DeepSeek 视觉能力仅 vision 模型可用，image_url 支持 data URL（见官方 Vision 指南）；
+ *        实测若不显式要求"必须使用附件"，模型容易只按文字要求作答而忽略附件内容，故此处注入强指令。
  */
 function buildUserContent(user, atts) {
-  let text = user;
+  const images = atts.filter((a) => a.kind === 'image');
+  const texts = atts.filter((a) => a.kind === 'text');
+  const files = atts.filter((a) => a.kind === 'file');
+  let head = '';
+  if (atts.length > 0) {
+    head += '【本次提交的附件（必须使用）】共 ' + atts.length + ' 个。'
+      + '请先完整读取并理解全部附件内容，再结合下方的文字要求生成结果；'
+      + '生成结果必须体现附件中的关键信息（图片里的文字/公式/图表/板书，文档里的要点与硬性要求），不得忽略或只按文字要求作答。\n';
+    if (images.length > 0) {
+      head += '· 图片 ' + images.length + ' 张：' + images.map((a) => a.name).join('、')
+        + '（请逐张识别图中文字与结构，识别到的内容必须落入生成结果）\n';
+    }
+    if (texts.length > 0) {
+      head += '· 文档 ' + texts.length + ' 个：' + texts.map((a) => a.name).join('、')
+        + '（已解析为文本，见下方【附件：文件名】段落，其中的要求优先级最高）\n';
+    }
+    if (files.length > 0) {
+      head += '· 其他附件 ' + files.length + ' 个：' + files.map((a) => a.name).join('、')
+        + '（暂无法解析内容，请结合文件名理解）\n';
+    }
+    head += '\n';
+  }
+  let text = head + user;
   for (const a of atts) {
     if (a.kind === 'text') {
       text += '\n\n【附件：' + a.name + '】\n' + a.text;
@@ -293,13 +317,13 @@ function buildUserContent(user, atts) {
       text += '\n\n【附件：' + a.name + '】（该格式暂不支持内容解析，请结合文件名与用户描述理解）';
     }
   }
-  const images = atts.filter((a) => a.kind === 'image');
   if (images.length === 0) {
     return text;
   }
   const parts = [{ type: 'text', text: text }];
   for (const im of images) {
-    parts.push({ type: 'image_url', image_url: { url: im.data } });
+    // detail: high 保留原图细节，利于识别图片中的文字、公式与图表
+    parts.push({ type: 'image_url', image_url: { url: im.data, detail: 'high' } });
   }
   return parts;
 }
