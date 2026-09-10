@@ -12,7 +12,7 @@ import window from '@ohos.window';
 import { I18n } from '../I18n';
 import { AppTheme } from '../AppTheme';
 import { AppFonts } from '../AppFonts';
-import { RichHtml, RichRun } from '../RichHtml';
+import { RichHtml, RichRun, StyleOp } from '../RichHtml';
 import { RichBox } from './RichBox';
 import { DocxExporter } from '../DocxExporter';
 import { PptxExporter, CourseSlide } from '../PptxExporter';
@@ -117,6 +117,20 @@ export struct ResultPanel {
   private selEnd: number = -1;
   /** 本次编辑会话是否做过样式/颜色操作（未操作且文本未变时，保存直接回写原文，避免 SDK 回读抖动剥除整篇样式） */
   private editedFlag: boolean = false;
+  /** 本次编辑会话记录的样式操作（保存时确定性回写，避免依赖 SDK 样式读回） */
+  private styleOps: StyleOp[] = [];
+  /** AppStorage 键：编辑浮层是否打开（页面 onBackPress 据此拦截左滑返回，避免直接退出页面丢结果） */
+  static readonly EDIT_OPEN_KEY: string = 'editorOpen';
+  /** AppStorage 键：页面请求关闭编辑浮层（值为时间戳，@Watch 触发） */
+  static readonly EDIT_CLOSE_KEY: string = 'editorCloseReq';
+  /** 页面返回手势请求关闭编辑：与"关闭"按钮一致，先确认"放弃并退出" */
+  @StorageProp('editorCloseReq') @Watch('onCloseReq') closeReq: number = 0;
+
+  onCloseReq(): void {
+    if (this.editing) {
+      this.askDiscardExit();
+    }
+  }
   /** 选区样式快照：在 onSelect 时计算（点击工具栏按钮后选区可能被系统收起，不能用实时选区判断 toggle） */
   private selBold: boolean = false;
   private selItalic: boolean = false;
@@ -247,7 +261,10 @@ export struct ResultPanel {
     this.selStart = -1;
     this.selEnd = -1;
     this.editedFlag = false;
+    this.styleOps = [];
     this.refreshTopInset();
+    // 标记编辑浮层已打开：页面侧拦截返回手势，改为"放弃并退出"确认，避免左滑直接把页面弹栈丢结果
+    AppStorage.setOrCreate(ResultPanel.EDIT_OPEN_KEY, true);
     this.editing = true;
   }
 
@@ -330,30 +347,35 @@ export struct ResultPanel {
     this.selStrike = anyText && sAll;
   }
 
-  /** 读回编辑器全部内容（样式片段 → HTML） */
+  /**
+   * 读回编辑器全部内容（样式片段 → HTML）
+   * 优先走"原文 + 样式操作"的确定性回写：只要纯文本未被改动，就直接按记录的样式操作
+   * 改写原文 HTML，完全不依赖 RichEditor 的样式读回（部分设备读回会把内联标签整篇丢掉）；
+   * 仅在用户改动了文字时才退回 SDK 读回（此时原样式偏移已失效）。
+   */
   private readHtml(): string {
     if (!this.editorReady) {
       return this.result;
     }
-    // 无任何样式/颜色操作且文本与原文一致（含"打开即退出"）时直接回写原文，
-    // 避免依赖 SDK 回读把原本正确的样式整篇剥成纯文本
-    if (!this.editedFlag) {
-      let plainNow: string = '';
-      try {
-        const spans = this.rc.getSpans();
-        for (let i: number = 0; i < spans.length; i++) {
-          const sp = spans[i];
-          const mayText: RichEditorTextSpanResult = sp as RichEditorTextSpanResult;
-          if (mayText.value !== undefined) {
-            plainNow += mayText.value;
-          }
+    let plainNow: string = '';
+    try {
+      const spans = this.rc.getSpans();
+      for (let i: number = 0; i < spans.length; i++) {
+        const sp = spans[i];
+        const mayText: RichEditorTextSpanResult = sp as RichEditorTextSpanResult;
+        if (mayText.value !== undefined) {
+          plainNow += mayText.value;
         }
-      } catch (e) {
-        plainNow = '';
       }
-      if (plainNow === RichHtml.toPlain(this.result)) {
+    } catch (e) {
+      plainNow = '';
+    }
+    if (plainNow !== '' && plainNow === RichHtml.plainOf(this.result)) {
+      // 文字未变：仅样式变化 —— 确定性回写（无样式操作则原样返回）
+      if (this.styleOps.length === 0) {
         return this.result;
       }
+      return RichHtml.applyStyleOps(this.result, this.styleOps);
     }
     try {
       const spans = this.rc.getSpans();
@@ -379,7 +401,9 @@ export struct ResultPanel {
           color: color, heading: 0, size: size
         });
       }
-      return RichHtml.runsToHtml(runs);
+      // 文字有改动：用读回片段 + 映射后的样式操作重建（保证改动前后的样式尽量保留）
+      const mapped: StyleOp[] = RichHtml.mapOps(this.styleOps, RichHtml.plainOf(this.result), plainNow);
+      return RichHtml.runsToHtml(RichHtml.applyOpsToRuns(runs, mapped));
     } catch (e) {
       return this.result;
     }
@@ -433,6 +457,8 @@ export struct ResultPanel {
       st.decoration = { type: on ? TextDecorationType.LineThrough : TextDecorationType.None };
     }
     this.editedFlag = true;
+    const op: StyleOp = { kind: kind, on: on, color: '', start: this.selStart, end: this.selEnd };
+    this.styleOps.push(op);
     this.updateRange(st);
     this.flipSelStyle(kind, on);
   }
@@ -446,6 +472,9 @@ export struct ResultPanel {
     const st: RichEditorTextStyle = {};
     st.fontColor = colorHex === '' ? '#1B1B1F' : colorHex;
     this.editedFlag = true;
+    const hex: string = colorHex === '' ? '' : colorHex.replace('#', '').toLowerCase();
+    const op: StyleOp = { kind: 'color', on: colorHex !== '', color: hex, start: this.selStart, end: this.selEnd };
+    this.styleOps.push(op);
     this.updateRange(st);
   }
 
@@ -537,11 +566,13 @@ export struct ResultPanel {
   private doneEdit(): void {
     this.onEdited(this.readHtml());
     this.editing = false;
+    AppStorage.setOrCreate(ResultPanel.EDIT_OPEN_KEY, false);
   }
 
   /** 放弃本次编辑（内容不写回） */
   private cancelEdit(): void {
     this.editing = false;
+    AppStorage.setOrCreate(ResultPanel.EDIT_OPEN_KEY, false);
   }
 
   private saveEdited(): void {

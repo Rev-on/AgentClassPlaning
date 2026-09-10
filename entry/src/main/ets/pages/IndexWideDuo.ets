@@ -52,11 +52,9 @@ interface LivePayload {
 /** 下半屏：生成结果全宽大面板 */
 @Component
 struct DuoResultBar {
-  /** 实时结果负载变化时自动滚动到底部 */
-  @StorageLink('liveGenResult') @Watch('onLiveChanged') liveJson: string = '{"phase":"idle","kind":"","type":"","title":"","text":""}';
+  @StorageLink('liveGenResult') liveJson: string = '{"phase":"idle","kind":"","type":"","title":"","text":""}';
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
-  private scroller: Scroller = new Scroller();
 
   private t(key: string): string {
     void this.appLang;
@@ -92,30 +90,6 @@ struct DuoResultBar {
       // 忽略异常 JSON
     }
     return p;
-  }
-
-  /** 生成中实时文本变化：预览区自动滚动到底部（立即一次 + 布局稳定后兜底一次） */
-  private onLiveChanged(): void {
-    const p: LivePayload = this.load();
-    if (p.phase !== 'busy' || p.text === '') {
-      return;
-    }
-    this.scroller.scrollEdge(Edge.Bottom);
-    setTimeout(() => {
-      this.scroller.scrollEdge(Edge.Bottom);
-    }, 60);
-  }
-
-  /** 生成中实时文本变化：预览区自动滚动到底部（立即一次 + 布局稳定后兜底一次） */
-  private onLiveChanged(): void {
-    const p: LivePayload = this.load();
-    if (p.phase !== 'busy' || p.text === '') {
-      return;
-    }
-    this.scroller.scrollEdge(Edge.Bottom);
-    setTimeout(() => {
-      this.scroller.scrollEdge(Edge.Bottom);
-    }, 60);
   }
 
   /** 底部编辑后回写总线（保持 done 态） */
@@ -206,7 +180,6 @@ struct DuoResultBar {
             .lineHeight(20)
             .width('100%')
         }
-        .scroller(this.scroller)
         .width('100%')
         .layoutWeight(1)
         .align(Alignment.TopStart)

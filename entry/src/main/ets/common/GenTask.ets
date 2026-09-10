@@ -11,6 +11,8 @@ import preferences from '@ohos.data.preferences';
 import common from '@ohos.app.ability.common';
 import { ApiConfig } from './ApiConfig';
 import { HistoryStore } from './HistoryStore';
+import { AttachFile, TaskAttachment } from './AttachTypes';
+import { AttachService } from './AttachService';
 
 /** 服务端任务信息（与 server/tasks.js 字段对应） */
 interface ServerTaskInfo {
@@ -43,6 +45,8 @@ interface TaskSubmitBody {
   system: string;
   user: string;
   deviceId: string;
+  /** 附件（图片/文档/拍照）：服务端据此构造多模态消息 */
+  attachments?: TaskAttachment[];
 }
 
 /** 查询响应 */
@@ -80,8 +84,9 @@ export class GenTask {
         method: http.RequestMethod.POST,
         header: GenTask.headers(),
         extraData: JSON.stringify(body),
-        connectTimeout: 10000,
-        readTimeout: 15000
+        connectTimeout: 15000,
+        // 带图片附件时请求体可达数 MB，上传超时放宽到 60s
+        readTimeout: 60000
       });
       return typeof resp.result === 'string' ? resp.result : JSON.stringify(resp.result);
     } finally {
@@ -139,15 +144,19 @@ export class GenTask {
 
   /** 提交生成任务；返回 taskId（成功后写入本地 pending 记录） */
   static async submit(ctx: common.UIAbilityContext, type: string, label: string,
-    system: string, user: string): Promise<string> {
+    system: string, user: string, attachments?: AttachFile[]): Promise<string> {
     const dev = await GenTask.deviceId(ctx);
-    const raw: string = await GenTask.postJson('/task', {
+    const body: TaskSubmitBody = {
       type: type,
       label: label,
       system: system,
       user: user,
       deviceId: dev
-    });
+    };
+    if (attachments !== undefined && attachments.length > 0) {
+      body.attachments = AttachService.toTask(attachments);
+    }
+    const raw: string = await GenTask.postJson('/task', body);
     const resp = JSON.parse(raw) as SubmitResp;
     if (resp.taskId === undefined || resp.taskId === '') {
       throw new Error('任务提交失败，请稍后重试');
@@ -162,6 +171,25 @@ export class GenTask {
     const raw: string = await GenTask.getJson('/task/' + taskId);
     const resp = JSON.parse(raw) as GetResp;
     return resp.task !== undefined ? resp.task : null;
+  }
+
+  /** 取消服务端任务（"停止生成"）：上游随即断开，不再继续产生内容；不阻塞调用方 */
+  static cancel(taskId: string): void {
+    if (taskId === '') {
+      return;
+    }
+    const req = http.createHttp();
+    req.request(GenTask.api('/task/' + taskId + '/cancel'), {
+      method: http.RequestMethod.POST,
+      header: GenTask.headers(),
+      extraData: '{}',
+      connectTimeout: 8000,
+      readTimeout: 8000
+    }).then(() => {
+      req.destroy();
+    }).catch(() => {
+      req.destroy();
+    });
   }
 
   /* ==================== pending 记录 ==================== */

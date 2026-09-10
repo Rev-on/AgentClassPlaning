@@ -38,7 +38,7 @@ const TLS_ENABLED = process.env.TLS_ENABLED === undefined
 // TLS 开启时可保留的明文端口（平滑迁移用），默认 0 = 不额外监听
 const HTTP_PORT = Number(process.env.HTTP_PORT || 0);
 const UPSTREAM = process.env.UPSTREAM_URL || 'https://api.deepseek.com/chat/completions';
-const MODEL = process.env.MODEL || 'deepseek-v4-flash';
+const MODEL = process.env.MODEL || 'deepseek-v4-flash-vision-exp';
 const API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const PROXY_TOKEN = process.env.PROXY_TOKEN || '';
 const TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 600000);
@@ -51,7 +51,8 @@ app.use(cors({
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-proxy-token']
 }));
-app.use(express.json({ limit: '2mb' }));
+// 附件（图片 base64）随任务一起提交，最大 10 个，单请求体积上限相应放宽
+app.use(express.json({ limit: '64mb' }));
 
 // 简易内存限流（按来源 IP，每分钟 N 次）
 const hits = new Map();
@@ -181,7 +182,9 @@ app.post('/api/chat', checkToken, (req, res) => {
   if (typeof data.system === 'string' && data.system.trim() !== '') {
     messages.push({ role: 'system', content: data.system });
   }
-  messages.push({ role: 'user', content: user });
+  // 直连回退路径同样支持附件（图片走多模态，文档文本并入 user 内容）
+  const relayAtts = normalizeAttachments(data.attachments);
+  messages.push({ role: 'user', content: buildUserContent(user, relayAtts) });
   req.body = Object.assign({}, data, { messages: messages });
   relay(req, res);
 });
@@ -237,6 +240,70 @@ async function fetchDeepSeek(system, user) {
 }
 
 /* ===================== 任务流式输出（SSE feed） ===================== */
+/** taskId -> 附件数组（仅驻内存：图片 base64 体积大，不写入 tasks.json 状态文件） */
+const taskAttachments = new Map();
+/** 单任务附件数量上限（与客户端一致） */
+const MAX_ATTACH = 10;
+
+/** 校验/裁剪客户端提交的附件：image(data=base64 或完整 dataURL) / text(已解析文本) / file(仅文件名) */
+function normalizeAttachments(raw) {
+  const out = [];
+  if (!Array.isArray(raw)) {
+    return out;
+  }
+  for (const a of raw.slice(0, MAX_ATTACH)) {
+    if (!a || typeof a !== 'object') {
+      continue;
+    }
+    const name = String(a.name || '附件');
+    if (a.kind === 'image') {
+      let data = typeof a.data === 'string' ? a.data : '';
+      if (data === '') {
+        continue;
+      }
+      // 客户端可传完整 dataURL（带正确 mime）；裸 base64 时按 jpeg 兜底
+      if (data.indexOf('data:') !== 0) {
+        data = 'data:image/jpeg;base64,' + data;
+      }
+      out.push({ kind: 'image', name: name, data: data });
+    } else if (a.kind === 'text') {
+      const text = typeof a.text === 'string' ? a.text : '';
+      if (text.trim() === '') {
+        continue;
+      }
+      out.push({ kind: 'text', name: name, text: text.slice(0, 60000) });
+    } else {
+      out.push({ kind: 'file', name: name });
+    }
+  }
+  return out;
+}
+
+/**
+ * 构造 user 消息内容：
+ *  - 无图片 -> 纯文本（正文 + 文档附件解析文本 + 未解析附件说明）
+ *  - 有图片 -> OpenAI 兼容多模态数组（text + image_url 若干），供视觉模型识别
+ */
+function buildUserContent(user, atts) {
+  let text = user;
+  for (const a of atts) {
+    if (a.kind === 'text') {
+      text += '\n\n【附件：' + a.name + '】\n' + a.text;
+    } else if (a.kind === 'file') {
+      text += '\n\n【附件：' + a.name + '】（该格式暂不支持内容解析，请结合文件名与用户描述理解）';
+    }
+  }
+  const images = atts.filter((a) => a.kind === 'image');
+  if (images.length === 0) {
+    return text;
+  }
+  const parts = [{ type: 'text', text: text }];
+  for (const im of images) {
+    parts.push({ type: 'image_url', image_url: { url: im.data } });
+  }
+  return parts;
+}
+
 /** taskId -> { ctrl: AbortController, manual: boolean }（取消任务用） */
 const taskAborters = new Map();
 /** taskId -> Set<res>（feed 订阅连接） */
@@ -297,11 +364,12 @@ async function fetchDeepSeekStreamed(task, onDelta) {
     }
   };
   try {
+    const atts = taskAttachments.get(task.id) || [];
     const messages = [];
     if (task.system && String(task.system).trim() !== '') {
       messages.push({ role: 'system', content: task.system });
     }
-    messages.push({ role: 'user', content: task.user });
+    messages.push({ role: 'user', content: buildUserContent(String(task.user || ''), atts) });
     const resp = await fetch(UPSTREAM, {
       method: 'POST',
       headers: {
@@ -382,6 +450,8 @@ async function fetchDeepSeekStreamed(task, onDelta) {
     if (taskAborters.get(task.id) === ab) {
       taskAborters.delete(task.id);
     }
+    // 附件仅在生成期间需要，结束即释放，避免大 base64 常驻内存
+    taskAttachments.delete(task.id);
   }
 }
 
@@ -542,8 +612,13 @@ app.post('/api/task', checkToken, (req, res) => {
     notifyFailTitle: typeof body.notifyFailTitle === 'string' ? body.notifyFailTitle : '',
     notifyFailBody: typeof body.notifyFailBody === 'string' ? body.notifyFailBody : ''
   });
+  // 附件需在任务开始执行前入表（runTask 内部异步消费）
+  const atts = normalizeAttachments(body.attachments);
+  if (atts.length > 0) {
+    taskAttachments.set(task.id, atts);
+  }
   runTask(task.id);
-  res.status(202).json({ ok: true, taskId: task.id, status: task.status });
+  res.status(202).json({ ok: true, taskId: task.id, status: task.status, attachments: atts.length });
 });
 
 // 查询任务

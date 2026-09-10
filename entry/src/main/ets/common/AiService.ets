@@ -1,7 +1,8 @@
 /**
- * AI 服务：封装 DeepSeek 对话补全接口（任务模式 + SSE 流式回调，直连为兜底）
- *  - 任务模式：提交服务端后台任务 -> feed 增量回调 -> 轮询兜底；支持"停止生成"（本地停止 + 服务端取消）
- *  - 直连兜底：thinking 已禁用（快速模式），stream 固定 false；偶发失败自动重试（最多 3 次）
+ * AI 服务：封装 DeepSeek 对话补全接口（非流式，稳定性优先）
+ *  - thinking 已禁用（快速模式），stream 固定 false
+ *  - 偶发失败自动重试（最多 3 次），HTTP 200 但响应异常给出明确提示
+ * @param onDelta 保留参数以兼容调用方，当前固定非流式不使用
  */
 import http from '@ohos.net.http';
 import common from '@ohos.app.ability.common';
@@ -11,6 +12,9 @@ import { HistoryStore } from './HistoryStore';
 import { ResultBus } from './ResultBus';
 import { GenSession } from './GenSession';
 import { SseClient, SseEvent, SseListener } from './SseClient';
+import { AttachFile, TaskAttachment } from './AttachTypes';
+import { AttachService } from './AttachService';
+import { RichHtml } from './RichHtml';
 
 /** 对话消息 */
 interface ChatMessage {
@@ -27,6 +31,8 @@ export interface AiTaskOpts {
   label: string;
   /** 页面是否已销毁/离开（true 后不再回调 UI，结果转为静默保存+通知） */
   gone?: () => boolean;
+  /** 本次生成携带的附件（图片/文档/拍照），服务端按多模态处理 */
+  attachments?: AttachFile[];
 }
 
 /** 思考模式配置：type=disabled 关闭思维链（快速模式） */
@@ -42,6 +48,8 @@ interface ChatRequest {
   max_tokens: number;
   stream: boolean;
   thinking: ThinkingConfig;
+  /** 附件（图片/文档），服务端据此构造多模态消息 */
+  attachments?: TaskAttachment[];
 }
 
 /** 响应中的单条选择 */
@@ -66,49 +74,63 @@ interface TaskCtl {
   accepted: boolean;
 }
 
+/** 正在进行的生成（按页面 key，如 plan/talk）：用于"停止生成" */
+interface ActiveGen {
+  taskId: string;
+  sse: SseClient | null;
+  stopped: boolean;
+}
+
 /** 任务 feed 订阅结果 */
 interface FeedResult {
   final: boolean;
   content: string;
-  /** SSE 收到 cancelled 事件：用户主动停止 */
-  cancelled: boolean;
-}
-
-/** 用户主动停止生成的哨兵错误：页面据此提示"已停止"而非"生成失败" */
-export class CancelledError extends Error {
-  constructor() {
-    super('cancelled');
-  }
 }
 
 export class AiService {
   /** 最大尝试次数（首次 + 2 次重试） */
   private static readonly MAX_ATTEMPTS: number = 3;
-  /** 进行中的任务登记（功能类型 -> taskId）：供"停止生成"定位服务端任务 */
-  private static readonly activeTasks: Map<string, string> = new Map();
-  /** 已请求停止的功能类型集合：生成链路据此尽快终止并丢弃结果 */
-  private static readonly stopFlags: Set<string> = new Set();
+  /** 正在进行的生成任务（key = 页面类型），供"停止生成"使用 */
+  private static active: Map<string, ActiveGen> = new Map();
 
   /**
-   * 停止指定功能的生成（页面上"停止生成"按钮）：
-   *  1. 置本地停止标记：停止增量上屏，生成链路各环节据此尽快终止并丢弃结果；
-   *  2. 向服务端任务发送取消指令（SSE 收到 cancelled 事件 / 轮询读到取消态）。
-   * 取消请求失败不抛出：本地停止标记已保证不再展示后续结果。
+   * 立即停止某页面正在进行的生成：
+   *  - 关闭本地 SSE 订阅 + 通知服务端取消任务（上游连接随即断开，不再产生 token 消耗）
+   *  - 已生成的部分文本由页面保留；不写历史、不写会话
    */
-  static async stop(type: string): Promise<void> {
-    if (type === '') {
+  static stop(key: string): void {
+    const a: ActiveGen | undefined = AiService.active.get(key);
+    if (a === undefined) {
       return;
     }
-    AiService.stopFlags.add(type);
-    const taskId: string | undefined = AiService.activeTasks.get(type);
-    if (taskId === undefined || taskId === '') {
-      return;
+    a.stopped = true;
+    if (a.sse !== null) {
+      try {
+        a.sse.close();
+      } catch (e) {
+        // ignore
+      }
     }
-    try {
-      await GenTask.cancel(taskId);
-    } catch (e) {
-      // 服务端取消失败不阻断本地停止：停止标记会阻止后续结果上屏
+    if (a.taskId !== '') {
+      GenTask.cancel(a.taskId);
     }
+  }
+
+  /** 指定 key 的生成是否已被请求停止 */
+  static isStopped(key: string): boolean {
+    const a: ActiveGen | undefined = AiService.active.get(key);
+    return a !== undefined && a.stopped;
+  }
+
+  /** 消费停止标记并清理注册（生成流程结束时调用） */
+  private static consumeStop(key: string): boolean {
+    const a: ActiveGen | undefined = AiService.active.get(key);
+    if (a === undefined) {
+      return false;
+    }
+    const was: boolean = a.stopped;
+    AiService.active.delete(key);
+    return was;
   }
 
   /**
@@ -152,12 +174,22 @@ export class AiService {
         // 任务已提交成功的标志：一旦服务端接受任务，后续任务态失败/超时不再回退直连重发
         // （否则会把同一篇内容再完整生成一遍，等待时间成倍叠加且可能双份计费/双份通知）
         const ctl: TaskCtl = { accepted: false };
+        // 提交前先登记活动项：确保"提交瞬间点停止"也能生效（此时 taskId 尚为空）
+        AiService.active.set(opts.type, { taskId: '', sse: null, stopped: false });
         try {
           const byTask: string = await AiService.chatByTask(systemPrompt, userPrompt, skipNote, onDelta, opts, ctl);
+          if (AiService.consumeStop(opts.type)) {
+            // 用户主动停止：半截文本已由页面保留；不写会话、不镜像、不入历史
+            return byTask;
+          }
           AiService.mirrorDone(duoBus, opts, byTask);
           sessEnd(byTask);
           return byTask;
         } catch (e) {
+          if (AiService.consumeStop(opts.type)) {
+            // 停止导致的异常：静默结束（避免弹出"生成失败"）
+            return '';
+          }
           if (ctl.accepted) {
             // 服务端已接受任务：结果由轮询/通知/recover 兜底，直接上报任务结果，避免重复生成
             if (e instanceof Error) {
@@ -170,26 +202,16 @@ export class AiService {
       }
       let lastErr: Error = new Error('AI 请求失败，请稍后重试');
       for (let attempt: number = 0; attempt < AiService.MAX_ATTEMPTS; attempt++) {
-        // 用户已请求停止：不再重试
-        if (opts !== undefined && AiService.stopFlags.has(opts.type)) {
-          throw new CancelledError();
-        }
         try {
-          const raw: string = await AiService.requestOnce(systemPrompt, userPrompt);
+          const raw: string = await AiService.requestOnce(systemPrompt, userPrompt,
+            opts !== undefined ? opts.attachments : undefined);
           const out: string = AiService.withAiNote(raw, skipNote);
-          // 请求已完成但用户已停止：丢弃结果，不再上屏
-          if (opts !== undefined && AiService.stopFlags.has(opts.type)) {
-            throw new CancelledError();
-          }
           if (opts !== undefined) {
             AiService.mirrorDone(duoBus, opts, out);
           }
           sessEnd(out);
           return out;
         } catch (e) {
-          if (e instanceof CancelledError) {
-            throw e; // 停止不重试
-          }
           lastErr = e instanceof Error ? e : new Error('AI 请求失败，请稍后重试');
         }
       }
@@ -197,19 +219,13 @@ export class AiService {
     } catch (e) {
       sessClear();
       if (duoBus) {
-        // 生成失败/停止：下屏结果面板复位为空态，避免停留在"生成中"
+        // 生成失败：下屏结果面板复位为空态，避免停留在"生成中"
         ResultBus.clear();
       }
       if (e instanceof Error) {
         throw e;
       }
       throw new Error('AI 请求失败，请稍后重试');
-    } finally {
-      // 清理任务登记与停止标记，避免影响下一次生成（登记键为任务类型 opts.type，与 stop()/chatByTask 一致）
-      if (opts !== undefined) {
-        AiService.activeTasks.delete(opts.type);
-        AiService.stopFlags.delete(opts.type);
-      }
     }
   }
 
@@ -239,31 +255,31 @@ export class AiService {
    */
   private static async chatByTask(systemPrompt: string, userPrompt: string, skipNote: boolean,
     onDelta: ((partial: string) => void) | undefined, opts: AiTaskOpts, ctl: TaskCtl): Promise<string> {
-    const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt);
+    const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt,
+      opts.attachments);
     // 提交成功：服务端已接受任务并开始生成，此后任何任务态失败都不应回退直连重发
     ctl.accepted = true;
-    AiService.activeTasks.set(opts.type, taskId);
+    // 登记到活动表：页面点"停止生成"时据此断开流并取消服务端任务
+    const existing: ActiveGen | undefined = AiService.active.get(opts.type);
+    const act: ActiveGen = existing !== undefined ? existing : { taskId: taskId, sse: null, stopped: false };
+    act.taskId = taskId;
+    AiService.active.set(opts.type, act);
+    if (act.stopped) {
+      // 提交完成前用户已点停止：立即取消刚创建的任务
+      GenTask.cancel(taskId);
+      await GenTask.clearPending(opts.ctx);
+      return '';
+    }
     let goneFlag: boolean = opts.gone !== undefined ? opts.gone() : false;
-    // 流式回调统一出口：增量上屏 + 2in1 下半屏镜像；用户停止后冻结上屏（结果丢弃）
-    const duoBus: boolean = AiService.duoActive(opts);
-    const emit = (partial: string): void => {
-      if (AiService.stopFlags.has(opts.type)) {
-        return;
-      }
-      if (onDelta !== undefined) {
-        onDelta(partial);
-      }
-      if (duoBus) {
-        ResultBus.live(opts.type, opts.label, opts.label, partial);
-      }
-    };
     // ---- 流式阶段：页面存活且需要增量展示时才订阅 feed；失败/断开自动退回轮询 ----
     if (!goneFlag && onDelta !== undefined) {
-      const feed = await AiService.feedOnce(taskId, emit);
-      // 用户停止（SSE cancelled / 本地停止标记）：清理 pending 并终止，丢弃已产出内容
-      if (feed.cancelled || AiService.stopFlags.has(opts.type)) {
-        await GenTask.clearPendingIf(opts.ctx, taskId);
-        throw new CancelledError();
+      const feed = await AiService.feedOnce(taskId, onDelta,
+        (): boolean => act.stopped,
+        (c: SseClient): void => { act.sse = c; });
+      if (act.stopped) {
+        // 用户已停止：结束任务、清 pending，半截文本由页面保留
+        await GenTask.clearPending(opts.ctx);
+        return '';
       }
       if (feed.final) {
         await GenTask.clearPending(opts.ctx);
@@ -283,6 +299,11 @@ export class AiService {
     }
     const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms));
     for (let i: number = 0; i < GenTask.POLL_MAX; i++) {
+      if (act.stopped) {
+        // 轮询期间用户点了"停止生成"
+        await GenTask.clearPending(opts.ctx);
+        return '';
+      }
       await sleep(GenTask.POLL_MS);
       goneFlag = opts.gone !== undefined ? opts.gone() : false;
       let content: string = '';
@@ -297,11 +318,6 @@ export class AiService {
       } catch (e) {
         continue; // 网络抖动：跳过本轮继续轮询
       }
-      // 用户已停止 / 服务端已取消：终止轮询并丢弃结果
-      if (AiService.stopFlags.has(opts.type) || status === 'cancelled') {
-        await GenTask.clearPendingIf(opts.ctx, taskId);
-        throw new CancelledError();
-      }
       if (status === 'done') {
         await GenTask.clearPending(opts.ctx);
         if (goneFlag) {
@@ -315,7 +331,7 @@ export class AiService {
             });
           }
         } else if (onDelta !== undefined) {
-          emit(content);
+          onDelta(content);
         }
         return AiService.withAiNote(content, skipNote);
       }
@@ -343,10 +359,11 @@ export class AiService {
    * 任何断线/异常/停滞（30s 无数据）都按 final=false 返回，由调用方退回轮询，绝不悬挂。
    */
   private static async feedOnce(taskId: string,
-    onDelta: (partial: string) => void): Promise<FeedResult> {
+    onDelta: (partial: string) => void,
+    isStopped?: () => boolean,
+    onClient?: (c: SseClient) => void): Promise<FeedResult> {
     return new Promise<FeedResult>((resolve) => {
       let acc: string = '';
-      let cancelledFlag: boolean = false;
       let settled: boolean = false;
       let stallTimer: number = -1;
       let cl: SseClient | null = null;
@@ -363,7 +380,7 @@ export class AiService {
           cl.close();
           cl = null;
         }
-        const fr: FeedResult = { final: final, content: content, cancelled: cancelledFlag };
+        const fr: FeedResult = { final: final, content: content };
         resolve(fr);
       };
       const touch = (): void => {
@@ -376,6 +393,10 @@ export class AiService {
       };
       const listener: SseListener = {
         onEvent: (evt: SseEvent): void => {
+          if (isStopped !== undefined && isStopped()) {
+            settle(false, '');
+            return;
+          }
           touch();
           const payload: string = evt.payload;
           let obj: Record<string, Object> | null = null;
@@ -396,12 +417,8 @@ export class AiService {
             const c: string = obj !== null && obj['c'] !== undefined && String(obj['c']) !== ''
               ? String(obj['c']) : acc;
             settle(true, c);
-          } else if (evt.event === 'cancelled') {
-            // 用户主动停止：记录标记后终止 feed（不走轮询兜底，避免停止后仍等待）
-            cancelledFlag = true;
-            settle(false, '');
-          } else if (evt.event === 'error') {
-            settle(false, ''); // 交给轮询兜底读取失败详情
+          } else if (evt.event === 'error' || evt.event === 'cancelled') {
+            settle(false, ''); // 交给轮询兜底读取失败/取消详情
           }
         },
         onEnd: (): void => {
@@ -414,6 +431,9 @@ export class AiService {
       };
       cl = new SseClient(listener);
       const sse: SseClient = cl;
+      if (onClient !== undefined) {
+        onClient(sse); // 暴露给"停止生成"以便立即断开
+      }
       sse.open('/task/' + taskId + '/feed').then((code: number): void => {
         if (code !== 200) {
           settle(false, '');
@@ -430,25 +450,29 @@ export class AiService {
     if (skip || content === '') {
       return content;
     }
+    // 确定性富文本兜底：模型（尤其视觉模型）若未输出行内样式，此处按通用规律补齐加粗/重点色，
+    // 保证预览与 Word/PPTX 导出都具备一致的富文本观感
+    const body: string = RichHtml.enhanceFormatting(content);
     const lang: string | undefined = AppStorage.get<string>('appLang');
     const tailPlain: string = lang === 'en' ? '(AI-generated, for reference only)' : '（AI生成，仅供参考）';
-    if (content.indexOf(tailPlain) >= 0) {
-      return content;
+    if (body.indexOf(tailPlain) >= 0) {
+      return body;
     }
     const tailHtml: string = lang === 'en' ?
       '<br><br><i>(AI-generated, for reference only)</i>' :
       '<br><br><i>（AI生成，仅供参考）</i>';
-    return content + tailHtml;
+    return body + tailHtml;
   }
 
-  /** 单次请求 */
-  private static async requestOnce(systemPrompt: string, userPrompt: string): Promise<string> {
+  /** 单次请求（attachments 为本次生成携带的附件，服务端负责多模态拼装） */
+  private static async requestOnce(systemPrompt: string, userPrompt: string,
+    attachments?: AttachFile[]): Promise<string> {
     const httpRequest = http.createHttp();
     try {
       const response = await httpRequest.request(ApiConfig.activeBaseUrl(), {
         method: http.RequestMethod.POST,
         header: AiService.buildHeader(),
-        extraData: AiService.buildBody(systemPrompt, userPrompt),
+        extraData: AiService.buildBody(systemPrompt, userPrompt, attachments),
         connectTimeout: ApiConfig.CONNECT_TIMEOUT,
         readTimeout: ApiConfig.READ_TIMEOUT
       });
@@ -497,7 +521,7 @@ export class AiService {
     return h;
   }
 
-  private static buildBody(systemPrompt: string, userPrompt: string): string {
+  private static buildBody(systemPrompt: string, userPrompt: string, attachments?: AttachFile[]): string {
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
@@ -511,6 +535,9 @@ export class AiService {
       // 关闭思考模式（快速模式）：跳过思维链直接输出，缩短响应时间
       thinking: { type: 'disabled' }
     };
+    if (attachments !== undefined && attachments.length > 0) {
+      req.attachments = AttachService.toTask(attachments);
+    }
     return JSON.stringify(req);
   }
 }

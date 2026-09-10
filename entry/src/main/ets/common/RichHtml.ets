@@ -31,6 +31,24 @@ interface HtmlSeg {
   size: number;
 }
 
+/**
+ * 编辑器样式操作（保存时确定性回写用）：
+ * 用户在编辑器里对某段选区做的加粗/斜体/下划线/删除线/颜色操作，
+ * 按"纯文本偏移量 + 开关 + 颜色"记录，保存时直接改写原文 HTML，
+ * 从而不依赖 RichEditor 的样式读回（部分设备读回不稳定，会把内联标签整篇丢掉）。
+ */
+export interface StyleOp {
+  /** bold | italic | underline | strike | color */
+  kind: string;
+  /** 是否为"开启"（关闭则移除该样式） */
+  on: boolean;
+  /** color 操作用：十六进制颜色（无 #；空串表示清除自定义颜色） */
+  color: string;
+  /** 选区起止（纯文本偏移） */
+  start: number;
+  end: number;
+}
+
 const ALLOWED: string[] = ['h1', 'h2', 'h3', 'h4', 'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'del', 'font'];
 
 export class RichHtml {
@@ -97,6 +115,189 @@ export class RichHtml {
     s = s.replace(/\r\n/g, '\n');
     s = s.replace(/\n{3,}/g, '\n\n');
     return s.trim();
+  }
+
+  /**
+   * 编辑器坐标空间的纯文本：= htmlToRuns 后所有片段文本的拼接。
+   * 必须用它（而不是 toPlain）与编辑器读回的文本、以及样式操作偏移做比对，
+   * 因为 toPlain 会压缩多余空行，与编辑器实际文本存在偏移差异。
+   */
+  static plainOf(html: string): string {
+    const runs: RichRun[] = RichHtml.htmlToRuns(html);
+    let s: string = '';
+    for (let i: number = 0; i < runs.length; i++) {
+      s += runs[i].text;
+    }
+    return s;
+  }
+
+  /**
+   * 按编辑器记录的样式操作确定性改写 HTML（保存回写用，不依赖 SDK 样式读回）：
+   * 原文解析为片段 → 在纯文本偏移处切分 → 应用样式开关 → 重建 HTML。
+   */
+  static applyStyleOps(html: string, ops: StyleOp[]): string {
+    if (ops.length === 0) {
+      return html;
+    }
+    const runs: RichRun[] = RichHtml.htmlToRuns(html);
+    return RichHtml.runsToHtml(RichHtml.applyOpsToRuns(runs, ops));
+  }
+
+  /** 把样式操作应用到已有片段（供"文字改动后"用读回片段 + 映射后的操作重建） */
+  static applyOpsToRuns(runs: RichRun[], ops: StyleOp[]): RichRun[] {
+    let list: RichRun[] = runs;
+    for (let i: number = 0; i < ops.length; i++) {
+      list = RichHtml.applyOneOp(list, ops[i]);
+    }
+    return list;
+  }
+
+  /**
+   * 文字被改动后，把原样式操作偏移映射到新文本偏移：
+   *  - 完全落在公共前缀内：偏移不变
+   *  - 完全落在公共后缀内：整体平移（delta = 新长度 - 原长度）
+   *  - 跨越改动区间：无法可靠映射，丢弃该条操作
+   */
+  static mapOps(ops: StyleOp[], orig: string, now: string): StyleOp[] {
+    const out: StyleOp[] = [];
+    if (ops.length === 0 || orig === now) {
+      return ops;
+    }
+    let cp: number = 0;
+    const minLen: number = orig.length < now.length ? orig.length : now.length;
+    while (cp < minLen && orig.charAt(cp) === now.charAt(cp)) {
+      cp++;
+    }
+    let cs: number = 0;
+    while (cs < (minLen - cp) && orig.charAt(orig.length - 1 - cs) === now.charAt(now.length - 1 - cs)) {
+      cs++;
+    }
+    const delta: number = now.length - orig.length;
+    for (let i: number = 0; i < ops.length; i++) {
+      const op: StyleOp = ops[i];
+      if (op.end <= cp) {
+        out.push(op);
+      } else if (op.start >= orig.length - cs) {
+        const moved: StyleOp = {
+          kind: op.kind, on: op.on, color: op.color,
+          start: op.start + delta, end: op.end + delta
+        };
+        out.push(moved);
+      }
+    }
+    return out;
+  }
+
+  /** 在指定纯文本偏移处切分片段（保证样式区间边界对齐） */
+  private static splitRunsAt(runs: RichRun[], pos: number): RichRun[] {
+    if (pos <= 0) {
+      return runs;
+    }
+    const out: RichRun[] = [];
+    let acc: number = 0;
+    for (let i: number = 0; i < runs.length; i++) {
+      const r: RichRun = runs[i];
+      const len: number = r.text.length;
+      if (pos > acc && pos < acc + len) {
+        const cut: number = pos - acc;
+        const a: RichRun = {
+          text: r.text.substring(0, cut), bold: r.bold, italic: r.italic, underline: r.underline,
+          strike: r.strike, color: r.color, heading: r.heading, size: r.size
+        };
+        const b: RichRun = {
+          text: r.text.substring(cut), bold: r.bold, italic: r.italic, underline: r.underline,
+          strike: r.strike, color: r.color, heading: r.heading, size: r.size
+        };
+        out.push(a);
+        out.push(b);
+      } else {
+        out.push(r);
+      }
+      acc += len;
+    }
+    return out;
+  }
+
+  /** 应用一条样式操作（区间内片段统一开/关） */
+  private static applyOneOp(runs: RichRun[], op: StyleOp): RichRun[] {
+    let list: RichRun[] = RichHtml.splitRunsAt(runs, op.start);
+    list = RichHtml.splitRunsAt(list, op.end);
+    const out: RichRun[] = [];
+    let acc: number = 0;
+    for (let i: number = 0; i < list.length; i++) {
+      const r: RichRun = list[i];
+      const len: number = r.text.length;
+      const inRange: boolean = len > 0 && acc >= op.start && acc + len <= op.end;
+      if (!inRange) {
+        out.push(r);
+        acc += len;
+        continue;
+      }
+      const n: RichRun = {
+        text: r.text, bold: r.bold, italic: r.italic, underline: r.underline,
+        strike: r.strike, color: r.color, heading: r.heading, size: r.size
+      };
+      if (op.kind === 'bold') {
+        n.bold = op.on;
+      } else if (op.kind === 'italic') {
+        n.italic = op.on;
+      } else if (op.kind === 'underline') {
+        n.underline = op.on;
+        if (op.on) {
+          n.strike = false; // 编辑器同一时刻只保留一种装饰线
+        }
+      } else if (op.kind === 'strike') {
+        n.strike = op.on;
+        if (op.on) {
+          n.underline = false;
+        }
+      } else if (op.kind === 'color') {
+        n.color = op.on ? op.color : '';
+      }
+      out.push(n);
+      acc += len;
+    }
+    return out;
+  }
+
+  /**
+   * 确定性富文本格式化（兜底）：
+   * 部分模型（如视觉模型）只输出 <h2>/<h3>/<p> 等结构标签而忽略行内样式，
+   * 导致预览与导出"看起来没格式"。本方法在检测到"完全没有行内样式标签"时，
+   * 按教学文案的通用规律确定性地注入加粗/重点色；已有行内样式的内容原样返回。
+   */
+  static enhanceFormatting(html: string): string {
+    if (html.trim() === '' || !RichHtml.looksLikeHtml(html)) {
+      return html;
+    }
+    const lower: string = html.toLowerCase();
+    if (lower.indexOf('<b>') >= 0 || lower.indexOf('<strong>') >= 0 || lower.indexOf('<i>') >= 0 ||
+      lower.indexOf('<u>') >= 0 || lower.indexOf('<s>') >= 0 || lower.indexOf('<font ') >= 0) {
+      return html;
+    }
+    // 仅处理文本节点，避免破坏标签结构
+    return html.replace(/>([^<]*)</g, (m: string, t: string): string => {
+      return '>' + RichHtml.fmtTextNode(t) + '<';
+    });
+  }
+
+  /** 单个文本节点的确定性格式化（供 enhanceFormatting 使用） */
+  private static fmtTextNode(text: string): string {
+    let s: string = text;
+    // Markdown 残留兜底
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    // 方括号强调（教案/试题常见）
+    s = s.replace(/【([^】]+)】/g, '<b>【$1】</b>');
+    // 重难点类标签：红色加粗（教学常规视觉）
+    s = s.replace(/^(教学重点|教学难点|重点|难点|易错点|考点)([：:])/, '<font color="#cc0000"><b>$1$2</b></font>');
+    // 常见固定字段标签：加粗
+    s = s.replace(/^(学科|教材版本|版本|年级|课时|课型|教学目标|知识与技能|过程与方法|情感态度与价值观|核心素养|教学准备|教师准备|学生准备|环境准备|学情分析|设计意图|板书设计|作业布置|分层作业|教学反思|评价方式|课堂小结|小结|作业|反思|导入|情境导入)([：:])/, '<b>$1$2</b>');
+    // 师生活动标签：加粗
+    s = s.replace(/^(师|生|教师|学生)([：:])/, '<b>$1$2</b>');
+    s = s.replace(/([。；;！!？?])(师|生)([：:])/g, '$1<b>$2$3</b>');
+    // 环节标题：加粗
+    s = s.replace(/^(环节[一二三四五六七八九十0-9]+[^<]{0,20})/, '<b>$1</b>');
+    return s;
   }
 
   /** 取 <font color="..."> 里的颜色（合法十六进制才返回，否则 ''） */

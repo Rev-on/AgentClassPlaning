@@ -4,7 +4,7 @@
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
 import router from '@ohos.router';
-import { AiService, CancelledError } from '../common/AiService';
+import { AiService } from '../common/AiService';
 import { GenSession, GenSessionState } from '../common/GenSession';
 import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
@@ -13,7 +13,10 @@ import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
-import { StreamPreview } from '../common/components/StreamPreview';
+import { RichBox } from '../common/components/RichBox';
+import { AttachBar } from '../common/components/AttachBar';
+import { AttachFile } from '../common/AttachTypes';
+import { RichHtml } from '../common/RichHtml';
 
 @Component
 export struct PlanContent {
@@ -23,17 +26,28 @@ export struct PlanContent {
   @State topic: string = I18n.t('def.topic');
   @State period: string = I18n.t('def.period');
   @State remark: string = '';
+  /** 附件（图片/文档/拍照），随生成请求一起提交 */
+  @State attachFiles: AttachFile[] = [];
   @State loading: boolean = false;
   @State result: string = '';
   /** 生成会话恢复（离开页面后重进仍显示生成中/结果） */
   private sessSub: number = -1;
+  /** 实时预览滚动控制器（生成中自动滚到最底部） */
+  private liveScroll: Scroller = new Scroller();
+  /** 用户是否点击了"停止生成" */
+  private stopRequested: boolean = false;
 
   aboutToAppear(): void {
     this.resumeGenSession();
   }
 
   aboutToDisappear(): void {
+    // 离开页面前把当前结果留存到生成会话：再次进入可恢复（编辑界面左滑退出同样不丢）
+    if (!this.loading && this.result !== '') {
+      GenSession.end(this.genKey(), this.result);
+    }
     this.leaveGenSession();
+        
   }
 
   private resumeGenSession(): void {
@@ -90,6 +104,7 @@ export struct PlanContent {
       promptAction.showToast({ message: this.t('err.noTopic') });
       return;
     }
+    this.stopRequested = false;
     this.loading = true;
     this.result = '';
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
@@ -97,23 +112,44 @@ export struct PlanContent {
     try {
       const content: string = await AiService.chat(Prompts.planSystem(), user, (partial: string) => {
         this.result = partial;
+        this.scrollLiveToBottom();
       }, false, {
         ctx: getContext(this) as common.UIAbilityContext,
         type: 'plan',
-        label: I18n.t('page.plan')
+        label: I18n.t('page.plan'),
+        attachments: this.attachFiles
       });
+      if (this.stopRequested) {
+        // 用户主动停止：保留已生成的部分文本，不覆盖、不入历史
+        this.stopRequested = false;
+        return;
+      }
       this.result = content;
       this.autoSaveHistory(content);
     } catch (e) {
-      if (e instanceof CancelledError) {
-        // 用户主动停止：提示已停止而非生成失败
-        promptAction.showToast({ message: this.t('gen.stopped') });
-      } else {
-        promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
-      }
+      promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
     }
+  }
+
+  /** 生成中：预览框实时滚动到最底部（等一帧让新内容完成布局） */
+  private scrollLiveToBottom(): void {
+    setTimeout((): void => {
+      try {
+        this.liveScroll.scrollEdge(Edge.Bottom);
+      } catch (e) {
+        // 预览区尚未挂载时忽略
+      }
+    }, 32);
+  }
+
+  /** 停止生成：立即取消任务与订阅，保留半截预览文本，回到生成前状态 */
+  private stopGen(): void {
+    this.stopRequested = true;
+    AiService.stop(this.genKey());
+    GenSession.clear(this.genKey());
+    this.loading = false;
   }
 
   /** 跳转课件大纲页，并把刚生成的教案富文本作为导入内容传递过去 */
@@ -163,6 +199,8 @@ export struct PlanContent {
       PageHeader({ title: this.t('page.plan') })
 
       Column({ space: 10 }) {
+        // 生成中：输入区整体置灰并锁定（按钮除外）
+        Column({ space: 10 }) {
         Row({ space: 10 }) {
           Text(this.t('label.subject')).fontSize(15).fontColor(this.col('title')).width(86)
             .fontFamily(AppFonts.family())
@@ -171,8 +209,6 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.subject = v; })
-            .enabled(!this.loading)
-            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -183,8 +219,6 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.version = v; })
-            .enabled(!this.loading)
-            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -195,8 +229,6 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.grade = v; })
-            .enabled(!this.loading)
-            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -207,8 +239,6 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.topic = v; })
-            .enabled(!this.loading)
-            .enabled(!this.loading)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -219,8 +249,6 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.period = v; })
-            .enabled(!this.loading)
-            .enabled(!this.loading)
         }
         .width('100%')
         Text(this.t('label.remark'))
@@ -234,9 +262,25 @@ export struct PlanContent {
           .height(42)
           .fontSize(13)
           .onChange((v: string) => { this.remark = v; })
-          .enabled(!this.loading)
 
-        if (!this.loading && this.result !== '') {
+        // 附件：+ 号选择图片/文档/拍照（上限 10）
+        AttachBar({ files: $attachFiles, disabled: this.loading })
+        }
+        .width('100%')
+        .enabled(!this.loading)
+        .opacity(this.loading ? 0.6 : 1)
+
+        if (this.loading) {
+          // 生成中：按钮变为"停止生成"（点击即停，保留半截预览）
+          Button(this.t('act.stop'))
+            .fontFamily(AppFonts.family())
+            .width('100%')
+            .height(44)
+            .backgroundColor('#C0564F')
+            .onClick(() => {
+              this.stopGen();
+            })
+        } else if (this.result !== '') {
           // 生成完成：主按钮切换为"重新生成"与"跳转至课件大纲生成"
           Row({ space: 10 }) {
             Button(this.t('act.regen'))
@@ -260,18 +304,13 @@ export struct PlanContent {
           }
           .width('100%')
         } else {
-          Button(this.loading ? this.t('act.stopGen') : this.t('act.plan'))
+          Button(this.t('act.plan'))
             .fontFamily(AppFonts.family())
             .width('100%')
             .height(44)
-            .backgroundColor(this.loading ? '#9DB8D9' : '#4A90D9')
+            .backgroundColor('#4A90D9')
             .onClick(() => {
-              if (this.loading) {
-                // 生成中再次点击 = 停止生成（本地停止 + 服务端取消）
-                AiService.stop(this.genKey());
-              } else {
-                this.generate();
-              }
+              this.generate();
             })
         }
       }
@@ -283,16 +322,38 @@ export struct PlanContent {
       if (this.bottomResult) {
         // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
       } else if (this.loading) {
-        // 流式输出中：实时预览已生成内容，随增量自动滚动到底部
-        StreamPreview({
-          text: this.result,
-          plain: false,
-          accent: '#4A90D9',
-          label: this.t('gen.streaming'),
-          labelColor: this.col('sub')
-        })
+        if (this.result !== '') {
+          // 流式输出中：实时展示已生成内容（清洗未闭合标签，滚动阅读）
+          Column() {
+            Row({ space: 6 }) {
+              LoadingProgress().width(14).height(14).color('#4A90D9')
+              Text(this.t('gen.streaming'))
+                .fontFamily(AppFonts.family())
+                .fontSize(12)
+                .fontColor(this.col('sub'))
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Start)
+            .padding({ bottom: 8 })
+            Scroll(this.liveScroll) {
+              RichBox({ html: RichHtml.liveSafe(this.result) })
+                .width('100%')
+            }
+            .width('100%')
+            .layoutWeight(1)
+            .scrollBar(BarState.Off)
+          }
+          .width('100%')
           .layoutWeight(1)
           .padding(16)
+          .alignItems(HorizontalAlign.Start)
+        } else {
+          Row({ space: 10 }) {
+            LoadingProgress().width(26).height(26).color('#4A90D9')
+            Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+              .fontFamily(AppFonts.family())
+          }.width('100%').justifyContent(FlexAlign.Center).padding(20)
+        }
       } else if (this.result !== '') {
         ResultPanel({
           result: this.result,
@@ -301,6 +362,8 @@ export struct PlanContent {
           onSave: () => this.saveToHistory(),
           onEdited: (t: string): void => {
             this.result = t;
+            // 同步到生成会话：离开页面/再次进入时不丢最新内容（含编辑结果）
+            GenSession.end(this.genKey(), t);
           }
         })
           .layoutWeight(1)
@@ -330,6 +393,18 @@ export struct PlanContent {
 @Entry
 @Component
 struct PlanEntry {
+
+  /**
+   * 编辑浮层打开时拦截返回手势/返回键：
+   * 交由编辑器弹出"放弃并退出"确认，避免左滑直接把页面弹栈导致生成结果丢失
+   */
+  onBackPress(): boolean {
+    if (AppStorage.get<boolean>('editorOpen') === true) {
+      AppStorage.setOrCreate('editorCloseReq', Date.now());
+      return true;
+    }
+    return false;
+  }
   build() {
     Column() {
       PlanContent()
