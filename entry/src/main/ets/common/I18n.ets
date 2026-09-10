@@ -331,7 +331,36 @@ export class I18n {
     ['set.fontApply', '应用'],
     ['set.fontPreview', '教案、课件与家校沟通示例文字'],
     ['toast.fontApplied', '字号已应用'],
-    ['err.fontUnsupported', '当前设备暂不支持调整字号']
+    ['err.fontUnsupported', '当前设备暂不支持调整字号'],
+    // ---- 运行期提示 / 导出 / 预览（五种语言全覆盖） ----
+    ['splash.powered', '华为云™提供技术支持'],
+    ['ai.note', '（AI生成，仅供参考）'],
+    ['toast.exportedTo', '已导出：'],
+    ['cw.page', '页面 {n}'],
+    ['cw.pageOf', '第 {i} / {t} 页'],
+    ['cw.noPoints', '（本页无要点）'],
+    ['cw.noPointsDraft', '（本页无要点，请在粗稿上补充）'],
+    ['cw.visual', '配图建议：'],
+    ['cw.empty', '（结果将在这里显示）'],
+    ['err.aiFail', 'AI 生成失败，请稍后重试'],
+    ['err.aiReqFail', 'AI 请求失败，请稍后重试'],
+    ['err.aiSlow', 'AI 生成较慢，请稍后到历史记录中查看结果'],
+    ['err.aiBadResp', 'AI 服务返回了无法解析的内容（HTTP {code}），请稍后重试'],
+    ['err.aiAbnormal', 'AI 服务返回异常（HTTP {code}），请稍后重试'],
+    ['err.noValid', 'AI 未返回有效内容，请稍后重试'],
+    ['err.truncated', '内容生成被截断，请减少输入内容后重试'],
+    ['err.submitFail', '任务提交失败，请稍后重试'],
+    ['err.sseFail', '连接中断，请稍后重试'],
+    ['def.importedPlan', '教案导入'],
+    ['def.researchInput', '我教八年级物理，想研究如何利用错题本提升学生物理成绩，请给选题建议'],
+    ['def.situation', '小明最近两次数学测验成绩下滑明显，从85分降到68分。家长比较焦虑，希望了解原因。'],
+    ['seats.mdHeader', '排\\座'],
+    ['err.pptxJson', '课件大纲 JSON 为空或格式不正确，无法导出 PPTX'],
+    ['err.pptxTpl', 'PPTX 模板缺少必要部件：'],
+    ['err.canceled', '任务已取消'],
+    ['err.rateLimit', '请求过于频繁，请稍后再试'],
+    ['err.taskMissing', '任务不存在或已过期'],
+    ['err.serverBusy', '服务异常，请稍后再试']
   ]);
 
   private static readonly en: Map<string, string> = new Map<string, string>([
@@ -652,7 +681,35 @@ export class I18n {
     ['set.fontApply', 'Apply'],
     ['set.fontPreview', 'Sample: lesson plans, slides and parent messages'],
     ['toast.fontApplied', 'Font size applied'],
-    ['err.fontUnsupported', 'Font size adjustment is not supported on this device']
+    ['err.fontUnsupported', 'Font size adjustment is not supported on this device'],
+    ['splash.powered', 'Technical support provided by Huawei Cloud™'],
+    ['ai.note', '(AI-generated, for reference only)'],
+    ['toast.exportedTo', 'Exported: '],
+    ['cw.page', 'Page {n}'],
+    ['cw.pageOf', 'Page {i} / {t}'],
+    ['cw.noPoints', '(No key points on this page)'],
+    ['cw.noPointsDraft', '(No key points; please add them in the draft)'],
+    ['cw.visual', 'Suggested visual: '],
+    ['cw.empty', '(The result will appear here)'],
+    ['err.aiFail', 'AI generation failed. Please try again later'],
+    ['err.aiReqFail', 'AI request failed. Please try again later'],
+    ['err.aiSlow', 'AI is taking longer than usual. Check History later for the result'],
+    ['err.aiBadResp', 'The AI service returned unparsable content (HTTP {code}). Please try again later'],
+    ['err.aiAbnormal', 'The AI service returned an error (HTTP {code}). Please try again later'],
+    ['err.noValid', 'The AI returned no valid content. Please try again later'],
+    ['err.truncated', 'The content was truncated. Please reduce the input and try again'],
+    ['err.submitFail', 'Failed to submit the task. Please try again later'],
+    ['err.sseFail', 'Connection interrupted. Please try again later'],
+    ['def.importedPlan', 'Imported Lesson Plan'],
+    ['def.researchInput', 'I teach Grade 8 Physics and would like to research how an error notebook can improve students\' physics scores. Please suggest research topics.'],
+    ['def.situation', 'Xiao Ming\'s math scores dropped noticeably in the last two tests, from 85 to 68. The parents are anxious and want to know why.'],
+    ['seats.mdHeader', 'Row\\Seat'],
+    ['err.pptxJson', 'The outline JSON is empty or invalid, so it cannot be exported to PPTX'],
+    ['err.pptxTpl', 'The PPTX template is missing a required part: '],
+    ['err.canceled', 'Task cancelled'],
+    ['err.rateLimit', 'Too many requests. Please try again later'],
+    ['err.taskMissing', 'Task not found or expired'],
+    ['err.serverBusy', 'Service error. Please try again later']
   ]);
 
   /** 读取当前语言：'zh' | 'en' | 'ug' | 'bo' | 'mn'（默认 zh） */
@@ -679,6 +736,50 @@ export class I18n {
       return MongolianDict.dict;
     }
     return I18n.zh;
+  }
+
+  /** 当前语言对应的 BCP-47 标记（用于导出 Word/PPTX 时标注文本语言，保证换行与字体正确） */
+  static bcp47(): string {
+    const lang: string = I18n.currentLang();
+    if (lang === 'en') {
+      return 'en-US';
+    }
+    if (lang === 'ug') {
+      return 'ug-CN';
+    }
+    if (lang === 'bo') {
+      return 'bo-CN';
+    }
+    if (lang === 'mn') {
+      return 'mn-CN';
+    }
+    return 'zh-CN';
+  }
+
+  /** 功能区角标：中文沿用精选单字，其它语言取该功能标题首字符（保证五种语言下都可读） */
+  static badge(zhGlyph: string, titleKey: string): string {
+    if (I18n.currentLang() === 'zh') {
+      return zhGlyph;
+    }
+    const title: string = I18n.t(titleKey);
+    return title.length > 0 ? title.charAt(0) : zhGlyph;
+  }
+
+  /** 服务端错误文案本地化：服务端固定返回中文，此处按当前界面语言映射；未知文案原样返回 */
+  static serverMsg(raw: string): string {
+    if (raw === '任务已取消') {
+      return I18n.t('err.canceled');
+    }
+    if (raw === '请求过于频繁，请稍后再试') {
+      return I18n.t('err.rateLimit');
+    }
+    if (raw === '任务不存在') {
+      return I18n.t('err.taskMissing');
+    }
+    if (raw === '服务异常，请稍后再试') {
+      return I18n.t('err.serverBusy');
+    }
+    return raw;
   }
 
   /** 按 key 取当前语言文本；少数民族语言缺词时回退中文 */

@@ -7,6 +7,7 @@ import { picker, fileIo as fs } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import promptAction from '@ohos.promptAction';
 import JSZip from '@ohos/jszip';
+import { I18n } from './I18n';
 
 /** 课件大纲的一页 */
 export interface CourseSlide {
@@ -70,7 +71,7 @@ export class PptxExporter {
   static async exportPptx(context: common.UIAbilityContext, json: string, fileName: string): Promise<void> {
     const slides: CourseSlide[] | null = PptxExporter.parseSlides(json);
     if (slides === null || slides.length === 0) {
-      throw new Error('课件大纲 JSON 为空或格式不正确，无法导出 PPTX');
+      throw new Error(I18n.t('err.pptxJson'));
     }
     // 1. 读取内置模板并解包
     const raw: Uint8Array = await context.resourceManager.getRawFileContent('pptskel.pptx');
@@ -92,7 +93,7 @@ export class PptxExporter {
     const typesName: string = '[Content_Types].xml';
     const tf = zip.file(typesName);
     if (tf === null) {
-      throw new Error('PPTX 模板缺少 [Content_Types].xml');
+      throw new Error(I18n.t('err.pptxTpl') + ' [Content_Types].xml');
     }
     let types: string = await tf.async('string');
     for (let i: number = 1; i < n; i++) {
@@ -105,7 +106,7 @@ export class PptxExporter {
     const presRelsName: string = 'ppt/_rels/presentation.xml.rels';
     const rf = zip.file(presRelsName);
     if (rf === null) {
-      throw new Error('PPTX 模板缺少 presentation.xml.rels');
+      throw new Error(I18n.t('err.pptxTpl') + ' presentation.xml.rels');
     }
     let presRels: string = await rf.async('string');
     let relsExtra: string = '';
@@ -118,7 +119,7 @@ export class PptxExporter {
     const presName: string = 'ppt/presentation.xml';
     const pf = zip.file(presName);
     if (pf === null) {
-      throw new Error('PPTX 模板缺少 presentation.xml');
+      throw new Error(I18n.t('err.pptxTpl') + ' presentation.xml');
     }
     let pres: string = await pf.async('string');
     const startTag: string = '<p:sldIdLst>';
@@ -150,7 +151,7 @@ export class PptxExporter {
     const file = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
     fs.writeSync(file.fd, buffer);
     fs.closeSync(file);
-    promptAction.showToast({ message: '已导出：' + fileName });
+    promptAction.showToast({ message: I18n.t('toast.exportedTo') + fileName });
   }
 
   // ============ 幻灯片部件 XML ============
@@ -178,7 +179,7 @@ export class PptxExporter {
         ? '<a:pPr marL="274320" indent="-274320"><a:spcBef><a:spcPts val="600"/></a:spcBef><a:buNone/></a:pPr>'
         : '<a:pPr marL="0" indent="0"><a:buNone/></a:pPr>';
       paras.push('<a:p>' + pPr +
-        '<a:r><a:rPr lang="zh-CN" sz="' + sz + '" b="' + (bold ? '1' : '0') + '" dirty="0">' +
+        '<a:r><a:rPr lang="' + I18n.bcp47() + '" sz="' + sz + '" b="' + (bold ? '1' : '0') + '" dirty="0">' +
         '<a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill></a:rPr>' +
         '<a:t>' + PptxExporter.escapeXml(text) + '</a:t></a:r></a:p>');
     }
@@ -196,13 +197,14 @@ export class PptxExporter {
     const left: number = 548640;
     const contentW: number = W - 548640 * 2;
     // 角标行（页号·类型）
-    const caption: string = '第 ' + index + ' / ' + total + ' 页' +
+    const caption: string = I18n.t('cw.pageOf')
+      .replace('{i}', index.toString()).replace('{t}', total.toString()) +
       (slide.type !== '' ? '  ·  ' + slide.type : '');
     // 标题
-    const title: string = slide.title !== '' ? slide.title : ('页面 ' + index);
+    const title: string = slide.title !== '' ? slide.title : I18n.t('cw.page').replace('{n}', index.toString());
     // 要点与底部配图方向
-    const pts: string[] = slide.points.length > 0 ? slide.points.slice(0, 8) : ['（本页无要点，请在粗稿上补充）'];
-    const visual: string = slide.visual !== '' ? '配图建议：' + slide.visual : '';
+    const pts: string[] = slide.points.length > 0 ? slide.points.slice(0, 8) : [I18n.t('cw.noPointsDraft')];
+    const visual: string = slide.visual !== '' ? I18n.t('cw.visual') + slide.visual : '';
     const shapes: string[] = [];
     shapes.push(PptxExporter.shapeXml(2, left, 182880, contentW, 228600, [caption], false, 1200, '7F7F7F', false));
     shapes.push(PptxExporter.shapeXml(3, left, 457200, contentW, 900000, [title], true, 3000, '000000', false));

@@ -226,7 +226,7 @@ export struct IndexWide {
   @Builder
   toolCard(entry: NavEntry) {
     Column({ space: 7 }) {
-      Text(entry.icon)
+      Text(I18n.badge(entry.icon, entry.labelKey))
         .fontFamily(AppFonts.family())
         .fontSize(18)
         .fontWeight(FontWeight.Bold)

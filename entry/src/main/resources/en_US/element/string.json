@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "AI lesson-prep assistant for junior high teachers"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "A junior-high teaching assistant built on a domestic LLM, covering lesson prep, teaching research and parent communication"
+    },
+    {
+      "name": "permission_microphone_reason",
+      "value": "Used to convert your voice into remark text"
+    }
+  ]
+}

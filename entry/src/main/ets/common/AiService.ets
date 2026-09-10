@@ -15,6 +15,7 @@ import { SseClient, SseEvent, SseListener } from './SseClient';
 import { AttachFile, TaskAttachment } from './AttachTypes';
 import { AttachService } from './AttachService';
 import { RichHtml } from './RichHtml';
+import { I18n } from './I18n';
 
 /** 对话消息 */
 interface ChatMessage {
@@ -195,12 +196,12 @@ export class AiService {
             if (e instanceof Error) {
               throw e;
             }
-            throw new Error('AI 生成失败，请稍后重试');
+            throw new Error(I18n.t('err.aiFail'));
           }
           // 提交阶段失败（旧版服务端/网络不通等）：回退到传统同步请求，保证可用
         }
       }
-      let lastErr: Error = new Error('AI 请求失败，请稍后重试');
+      let lastErr: Error = new Error(I18n.t('err.aiReqFail'));
       for (let attempt: number = 0; attempt < AiService.MAX_ATTEMPTS; attempt++) {
         try {
           const raw: string = await AiService.requestOnce(systemPrompt, userPrompt,
@@ -212,7 +213,7 @@ export class AiService {
           sessEnd(out);
           return out;
         } catch (e) {
-          lastErr = e instanceof Error ? e : new Error('AI 请求失败，请稍后重试');
+          lastErr = e instanceof Error ? e : new Error(I18n.t('err.aiReqFail'));
         }
       }
       throw lastErr;
@@ -225,7 +226,7 @@ export class AiService {
       if (e instanceof Error) {
         throw e;
       }
-      throw new Error('AI 请求失败，请稍后重试');
+      throw new Error(I18n.t('err.aiReqFail'));
     }
   }
 
@@ -337,11 +338,11 @@ export class AiService {
       }
       if (status === 'failed') {
         await GenTask.clearPending(opts.ctx);
-        let msg: string = 'AI 生成失败，请稍后重试';
+        let msg: string = I18n.t('err.aiFail');
         try {
           const t2 = await GenTask.fetchTask(taskId);
           if (t2 !== null && t2.error !== undefined && t2.error !== '') {
-            msg = t2.error;
+            msg = I18n.serverMsg(t2.error);
           }
         } catch (e) {
           // ignore
@@ -350,7 +351,7 @@ export class AiService {
       }
     }
     // 轮询超时：保留任务与 pending，下次进入 App 时由 recover 静默接管
-    throw new Error('AI 生成较慢，请稍后到历史记录中查看结果');
+    throw new Error(I18n.t('err.aiSlow'));
   }
 
   /**
@@ -453,14 +454,11 @@ export class AiService {
     // 确定性富文本兜底：模型（尤其视觉模型）若未输出行内样式，此处按通用规律补齐加粗/重点色，
     // 保证预览与 Word/PPTX 导出都具备一致的富文本观感
     const body: string = RichHtml.enhanceFormatting(content);
-    const lang: string | undefined = AppStorage.get<string>('appLang');
-    const tailPlain: string = lang === 'en' ? '(AI-generated, for reference only)' : '（AI生成，仅供参考）';
+    const tailPlain: string = I18n.t('ai.note');
     if (body.indexOf(tailPlain) >= 0) {
       return body;
     }
-    const tailHtml: string = lang === 'en' ?
-      '<br><br><i>(AI-generated, for reference only)</i>' :
-      '<br><br><i>（AI生成，仅供参考）</i>';
+    const tailHtml: string = '<br><br><i>' + tailPlain + '</i>';
     return body + tailHtml;
   }
 
@@ -488,7 +486,7 @@ export class AiService {
         }
       }
       if (data === null) {
-        throw new Error('AI 服务返回了无法解析的内容（HTTP ' + code + '），请稍后重试');
+        throw new Error(I18n.t('err.aiBadResp').replace('{code}', code.toString()));
       }
       if (code === 200) {
         if (data.choices !== undefined && data.choices.length > 0) {
@@ -498,15 +496,15 @@ export class AiService {
           }
           const reason: string = data.choices[0].finish_reason !== undefined ? data.choices[0].finish_reason : '';
           if (reason === 'length') {
-            throw new Error('内容生成被截断（输出长度不足），请减少输入内容后重试');
+            throw new Error(I18n.t('err.truncated'));
           }
-          throw new Error('AI 未返回有效内容，请稍后重试');
+          throw new Error(I18n.t('err.noValid'));
         }
       }
       if (data.error !== undefined && data.error.message !== undefined && data.error.message !== '') {
         throw new Error(data.error.message);
       }
-      throw new Error('AI 服务返回异常（HTTP ' + code + '），请稍后重试');
+      throw new Error(I18n.t('err.aiAbnormal').replace('{code}', code.toString()));
     } finally {
       httpRequest.destroy();
     }

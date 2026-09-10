@@ -20,8 +20,6 @@ export struct SettingsContent {
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
   /** 生成结果自动保存到历史（默认开） */
   @StorageLink('autoSaveHist') autoSave: boolean = true;
-  /** 2in1 结果分屏布局：auto=自动 / on=总是下半屏 / off=关闭 */
-  @StorageLink('duoLayout') duoLayout: string = 'auto';
   /** 应用内字号倍率（作用于全部 fp 文字） */
   @StorageLink('fontScale') fontScale: number = 1.0;
   /** 字号档位选中下标（0..3，对应 AppSettings.FONT_PRESETS） */
@@ -126,37 +124,6 @@ export struct SettingsContent {
     const ctx = getContext(this) as common.UIAbilityContext;
     AppSettings.saveTheme(ctx, theme).then(() => {
       promptAction.showToast({ message: I18n.t('set.themeHint') });
-    });
-  }
-
-  /** 2in1 结果分屏下拉选项 */
-  private duoOptions(): SelectOption[] {
-    return [
-      { value: this.t('set.duoAuto') },
-      { value: this.t('set.duoOn') },
-      { value: this.t('set.duoOff') }
-    ];
-  }
-
-  /** 当前结果分屏选项下标 */
-  private duoIndex(): number {
-    if (this.duoLayout === 'on') {
-      return 1;
-    }
-    if (this.duoLayout === 'off') {
-      return 2;
-    }
-    return 0;
-  }
-
-  /** 切换结果分屏布局（保存后由 Index 尺寸/形态监听即时重判） */
-  private switchDuo(value: string): void {
-    if (this.duoLayout === value) {
-      return;
-    }
-    const ctx = getContext(this) as common.UIAbilityContext;
-    AppSettings.saveDuoLayout(ctx, value).then(() => {
-      promptAction.showToast({ message: I18n.t('set.duoHint') });
     });
   }
 
@@ -351,36 +318,6 @@ export struct SettingsContent {
                 })
             }
             .width('100%')
-          }
-          .width('100%')
-          .padding(16)
-          .backgroundColor(this.col('card'))
-          .borderRadius(14)
-          .alignItems(HorizontalAlign.Start)
-
-          // 2in1 结果屏布局（自动 / 下半屏 / 关闭）
-          Column({ space: 10 }) {
-            Text(this.t('set.duo'))
-              .fontFamily(AppFonts.family())
-              .fontSize(13)
-              .fontColor(this.col('sub'))
-              .width('100%')
-            Text(this.t('set.duoDesc'))
-              .fontFamily(AppFonts.family())
-              .fontSize(11)
-              .fontColor(this.col('hint'))
-              .width('100%')
-              .lineHeight(16)
-            Select(this.duoOptions())
-              .selected(this.duoIndex())
-              .value(this.duoOptions()[this.duoIndex()].value as string)
-              .fontColor(this.col('text'))
-              .selectedOptionFontColor('#4A90D9')
-              .width('100%')
-              .onSelect((index: number) => {
-                const modes: string[] = ['auto', 'on', 'off'];
-                this.switchDuo(modes[index]);
-              })
           }
           .width('100%')
           .padding(16)

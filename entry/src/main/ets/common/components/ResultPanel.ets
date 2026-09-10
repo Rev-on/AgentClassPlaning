@@ -875,7 +875,7 @@ export struct ResultPanel {
               .fontColor('#9AA0A6')
           }
           .width('100%')
-          Text(s.title !== '' ? s.title : ('页面 ' + (index + 1)))
+          Text(s.title !== '' ? s.title : this.t('cw.page').replace('{n}', (index + 1).toString()))
             .fontFamily(AppFonts.family())
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
@@ -900,14 +900,14 @@ export struct ResultPanel {
               .alignItems(VerticalAlign.Top)
             }, (pt: string, pi: number) => s.page.toString() + '_' + pi.toString())
           } else {
-            Text('（本页无要点）')
+            Text(this.t('cw.noPoints'))
               .fontFamily(AppFonts.family())
               .fontSize(12)
               .fontColor('#9AA0A6')
               .width('100%')
           }
           if (s.visual !== '') {
-            Text('配图建议：' + s.visual)
+            Text(this.t('cw.visual') + s.visual)
               .fontFamily(AppFonts.family())
               .fontSize(12)
               .fontColor('#595959')
@@ -969,7 +969,7 @@ export struct ResultPanel {
 
       Scroll() {
         if (this.result === '') {
-          Text('（结果将在这里显示）')
+          Text(this.t('cw.empty'))
             .fontFamily(AppFonts.family())
             .fontSize(15)
             .fontColor(this.col('hint'))

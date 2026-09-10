@@ -27,7 +27,7 @@ export struct TalkContent {
 
   @State sceneIndex: number = 0;
   @State toneIndex: number = 0;
-  @State situation: string = '小明最近两次数学测验成绩下滑明显，从85分降到68分。家长比较焦虑，希望了解原因。';
+  @State situation: string = I18n.t('def.situation');
   @State remark: string = '';
   /** 附件（图片/文档/拍照），随生成请求一起提交 */
   @State attachFiles: AttachFile[] = [];

@@ -22,7 +22,7 @@ import { RichHtml } from '../common/RichHtml';
 @Component
 export struct ResearchContent {
   @State mode: number = 0;   // 0 选题建议 1 论文大纲 2 摘要润色
-  @State input: string = '我教八年级物理，想研究如何利用错题本提升学生物理成绩，请给选题建议';
+  @State input: string = I18n.t('def.researchInput');
   @State remark: string = '';
   /** 附件（图片/文档/拍照），随生成请求一起提交 */
   @State attachFiles: AttachFile[] = [];

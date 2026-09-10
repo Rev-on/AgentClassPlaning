@@ -13,6 +13,7 @@ import { ApiConfig } from './ApiConfig';
 import { HistoryStore } from './HistoryStore';
 import { AttachFile, TaskAttachment } from './AttachTypes';
 import { AttachService } from './AttachService';
+import { I18n } from './I18n';
 
 /** 服务端任务信息（与 server/tasks.js 字段对应） */
 interface ServerTaskInfo {
@@ -159,7 +160,7 @@ export class GenTask {
     const raw: string = await GenTask.postJson('/task', body);
     const resp = JSON.parse(raw) as SubmitResp;
     if (resp.taskId === undefined || resp.taskId === '') {
-      throw new Error('任务提交失败，请稍后重试');
+      throw new Error(I18n.t('err.submitFail'));
     }
     const pending: PendingTask = { type: type, label: label, taskId: resp.taskId };
     await GenTask.savePending(ctx, pending);

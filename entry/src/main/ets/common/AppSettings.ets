@@ -45,14 +45,14 @@ export class AppSettings {
       const lv = await store.get(AppSettings.KEY_LANG, 'zh');
       const tv = await store.get(AppSettings.KEY_THEME, 'system');
       const av = await store.get(AppSettings.KEY_AUTOSAVE, true);
-      const dv = await store.get(AppSettings.KEY_DUO, 'auto');
       const fv = await store.get(AppSettings.KEY_FONT_SCALE, 1.0);
       // 语言：用户手动选过（存在保存值）用保存值；否则跟随系统语言
       manual = hasLang;
       lang = manual ? AppSettings.normalizeLang(lv as string) : AppSettings.systemLang();
       theme = AppSettings.normalizeTheme(tv as string);
       autoSave = (av as boolean) !== false;
-      duo = AppSettings.normalizeDuo(dv as string);
+      // 结果屏布局已改为全自动：不再读取历史保存的覆盖值，避免旧值（强开/关闭）遗留后无法修改
+      duo = 'auto';
       fontScale = AppSettings.normalizeFontScale(fv as number);
     } catch (e) {
       // 默认值：主题跟随系统；语言跟随系统语言
@@ -101,22 +101,6 @@ export class AppSettings {
       return theme;
     }
     return 'system';
-  }
-
-  /** 2in1 分屏布局选择白名单校验（非法值默认自动） */
-  private static normalizeDuo(duo: string): string {
-    if (duo === 'on' || duo === 'off' || duo === 'auto') {
-      return duo;
-    }
-    return 'auto';
-  }
-
-  /** 保存“2in1 结果分屏布局”并立即生效（随后由 Index 重新判定布局） */
-  static async saveDuoLayout(context: common.UIAbilityContext, duo: string): Promise<void> {
-    const store = await preferences.getPreferences(context, AppSettings.STORE);
-    await store.put(AppSettings.KEY_DUO, AppSettings.normalizeDuo(duo));
-    await store.flush();
-    AppStorage.setOrCreate(AppSettings.KEY_DUO, AppSettings.normalizeDuo(duo));
   }
 
   /** 系统语言 → 应用语言代码（支持 zh/en/ug/bo/mn；其余回退中文） */

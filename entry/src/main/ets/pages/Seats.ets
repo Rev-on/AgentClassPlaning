@@ -120,7 +120,7 @@ class SeatsAlgorithm {
 
   /** 座位表转 Markdown 表格 */
   static toMarkdown(grid: string[][], rows: number, cols: number): string {
-    let md: string = '| 排\\座 |';
+    let md: string = '| ' + I18n.t('seats.mdHeader') + ' |';
     for (let c = 1; c <= cols; c++) {
       md += ' ' + c + ' |';
     }

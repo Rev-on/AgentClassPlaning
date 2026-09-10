@@ -7,6 +7,7 @@
  */
 import http from '@ohos.net.http';
 import { ApiConfig } from './ApiConfig';
+import { I18n } from './I18n';
 
 /** 解析后的 SSE 事件 */
 export interface SseEvent {
@@ -66,7 +67,7 @@ export class SseClient {
       return code;
     } catch (e) {
       this.destroy();
-      const msg: string = e instanceof Error ? e.message : 'SSE 连接失败';
+      const msg: string = e instanceof Error ? e.message : I18n.t('err.sseFail');
       this.listener.onError(msg);
       return -1;
     }

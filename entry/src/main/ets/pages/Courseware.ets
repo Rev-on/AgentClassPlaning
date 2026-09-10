@@ -54,7 +54,7 @@ export struct CoursewareContent {
       if (pr.planText !== undefined && pr.planText !== '') {
         this.importedPlan = pr.planText;
         this.importMode = true;
-        this.topic = I18n.currentLang() === 'en' ? 'Imported Plan' : '教案导入';
+        this.topic = this.t('def.importedPlan');
       }
     }
     this.resumeGenSession();

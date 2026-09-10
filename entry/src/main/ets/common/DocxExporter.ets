@@ -9,6 +9,7 @@ import { common } from '@kit.AbilityKit';
 import promptAction from '@ohos.promptAction';
 import JSZip from '@ohos/jszip';
 import { RichHtml, RichRun } from './RichHtml';
+import { I18n } from './I18n';
 
 /** 块级元素（与渲染组件一致的简化结构） */
 interface DocxBlock {
@@ -63,7 +64,7 @@ export class DocxExporter {
     const file = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
     fs.writeSync(file.fd, buffer);
     fs.closeSync(file);
-    promptAction.showToast({ message: '已导出：' + fileName });
+    promptAction.showToast({ message: I18n.t('toast.exportedTo') + fileName });
   }
 
   /** 导出文本为 .json 文件：剥离 ```json 围栏与前后杂文，仅保留 JSON；合法则格式化缩进 */
@@ -104,7 +105,7 @@ export class DocxExporter {
     const file = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
     fs.writeSync(file.fd, buffer);
     fs.closeSync(file);
-    promptAction.showToast({ message: '已导出：' + fileName });
+    promptAction.showToast({ message: I18n.t('toast.exportedTo') + fileName });
   }
 
   // ============ docx 固定结构 ============

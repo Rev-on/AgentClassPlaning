@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 主界面：底部三 Tab（支持五语言与深浅主题）
  *  备课助手 / 家校沟通 / 我的（历史记录、设置、班级管理等入口）
  */
@@ -242,24 +242,13 @@ struct Index {
     this.syncDuoWindow();
   }
 
-  /** 2in1 上下分屏判定（配合设置页 duoLayout：auto=自动检测 / on=强开 / off=关闭）
+  /** 2in1 上下分屏判定（结果屏布局已取消手动开关，固定自动检测）
    *  自动：仅 2in1 设备、大横屏、磁吸键盘未连接时启用（键盘模式=平板布局）
    */
   private refreshDuo(vw: number, vh: number): void {
-    const mode: string = AppStorage.get<string>('duoLayout') || 'auto';
-    if (mode === 'off') {
-      AppStorage.setOrCreate('appDuo', false);
-      return;
-    }
     const geometryWide: boolean = vw > vh && vw >= 900 && vh >= 520;
     // 半折叠双屏形态（物理下半屏存在）即使窗口偏小/偏竖也应启用 duo，铺窗后由 FoldSplitContainer 分配到上下两屏
     const twoScreen: boolean = DuoDetect.supported() && DuoDetect.hasLowerHalf();
-    const wide: boolean = geometryWide || twoScreen;
-    if (mode === 'on') {
-      // 手动强开（用于 2in1 设备形态识别不准确的兜底；鸿蒙 wideLayout 场景下生效）
-      AppStorage.setOrCreate('appDuo', wide && DuoDetect.manualAllowed());
-      return;
-    }
     const candidate: boolean = (DuoDetect.supported() && geometryWide && vw >= 1000 && vh >= 760) || twoScreen;
     if (!candidate) {
       AppStorage.setOrCreate('appDuo', false);
@@ -281,14 +270,7 @@ struct Index {
     }
   }
 
-  /** 设置页切换“结果屏布局”后立即重新判定（无需旋转/重启） */
-  private onDuoSetChange(): void {
-    if (this.lastVw > 0 && this.lastVh > 0) {
-      this.refreshDuo(this.lastVw, this.lastVh);
-    }
-  }
-
-  /** duo 形态变化（键盘热插拔 / 设置切换 / 启动检测完成）后同步窗口：半折叠双屏时把结果铺到物理下半屏 */
+  /** duo 形态变化（键盘热插拔 / 启动检测完成）后同步窗口：半折叠双屏时把结果铺到物理下半屏 */
   private onDuoModeChanged(): void {
     this.syncDuoWindow();
   }
@@ -618,42 +600,42 @@ struct Index {
             Grid() {
               GridItem() {
                 FunCard({
-                  icon: '教', title: this.t('card.plan'), desc: this.t('card.plan.desc'),
+                  icon: I18n.badge('教', 'card.plan'), title: this.t('card.plan'), desc: this.t('card.plan.desc'),
                   bgColor: '#E8F1FB',
                   onTap: () => router.pushUrl({ url: 'pages/Plan' })
                 })
               }
               GridItem() {
                 FunCard({
-                  icon: '课', title: this.t('card.courseware'), desc: this.t('card.courseware.desc'),
+                  icon: I18n.badge('课', 'card.courseware'), title: this.t('card.courseware'), desc: this.t('card.courseware.desc'),
                   bgColor: '#FFF4E5',
                   onTap: () => router.pushUrl({ url: 'pages/Courseware' })
                 })
               }
               GridItem() {
                 FunCard({
-                  icon: '题', title: this.t('card.quiz'), desc: this.t('card.quiz.desc'),
+                  icon: I18n.badge('题', 'card.quiz'), title: this.t('card.quiz'), desc: this.t('card.quiz.desc'),
                   bgColor: '#EAF7EF',
                   onTap: () => router.pushUrl({ url: 'pages/Quiz' })
                 })
               }
               GridItem() {
                 FunCard({
-                  icon: '研', title: this.t('card.research'), desc: this.t('card.research.desc'),
+                  icon: I18n.badge('研', 'card.research'), title: this.t('card.research'), desc: this.t('card.research.desc'),
                   bgColor: '#F3EDFB',
                   onTap: () => router.pushUrl({ url: 'pages/Research' })
                 })
               }
               GridItem() {
                 FunCard({
-                  icon: '析', title: this.t('card.analysis'), desc: this.t('card.analysis.desc'),
+                  icon: I18n.badge('析', 'card.analysis'), title: this.t('card.analysis'), desc: this.t('card.analysis.desc'),
                   bgColor: '#E6F4F2',
                   onTap: () => router.pushUrl({ url: 'pages/Analysis' })
                 })
               }
               GridItem() {
                 FunCard({
-                  icon: '位', title: this.t('card.seats'), desc: this.t('card.seats.desc'),
+                  icon: I18n.badge('位', 'card.seats'), title: this.t('card.seats'), desc: this.t('card.seats.desc'),
                   bgColor: '#FFF0E6',
                   onTap: () => router.pushUrl({ url: 'pages/Seats' })
                 })
@@ -699,14 +681,14 @@ struct Index {
             Grid() {
               GridItem() {
                 FunCard({
-                  icon: '话', title: this.t('card.talk'), desc: this.t('card.talk.desc'),
+                  icon: I18n.badge('话', 'card.talk'), title: this.t('card.talk'), desc: this.t('card.talk.desc'),
                   bgColor: '#FFF0F0',
                   onTap: () => router.pushUrl({ url: 'pages/Talk' })
                 })
               }
               GridItem() {
                 FunCard({
-                  icon: '报', title: this.t('card.report'), desc: this.t('card.report.desc'),
+                  icon: I18n.badge('报', 'card.report'), title: this.t('card.report'), desc: this.t('card.report.desc'),
                   bgColor: '#E8F1FB',
                   onTap: () => router.pushUrl({ url: 'pages/Report' })
                 })
@@ -752,21 +734,21 @@ struct Index {
             Grid() {
               GridItem() {
                 FunCard({
-                  icon: '史', title: this.t('card.history'), desc: this.t('card.history.desc'),
+                  icon: I18n.badge('史', 'card.history'), title: this.t('card.history'), desc: this.t('card.history.desc'),
                   bgColor: '#FFF4E5',
                   onTap: () => router.pushUrl({ url: 'pages/History' })
                 })
               }
               GridItem() {
                 FunCard({
-                  icon: '设', title: this.t('card.settings'), desc: this.t('card.settings.desc'),
+                  icon: I18n.badge('设', 'card.settings'), title: this.t('card.settings'), desc: this.t('card.settings.desc'),
                   bgColor: '#E6F4F2',
                   onTap: () => router.pushUrl({ url: 'pages/Settings' })
                 })
               }
               GridItem() {
                 FunCard({
-                  icon: '班', title: this.t('card.classes'), desc: this.t('card.classes.desc'),
+                  icon: I18n.badge('班', 'card.classes'), title: this.t('card.classes'), desc: this.t('card.classes.desc'),
                   bgColor: '#F3EDFB',
                   onTap: () => router.pushUrl({ url: 'pages/ClassManager' })
                 })
