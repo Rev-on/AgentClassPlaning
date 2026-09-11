@@ -20,6 +20,8 @@ interface ServerTaskInfo {
   id: string;
   status: string;
   content?: string;
+  /** 深度思考过程（思考模式下由服务端保存，供重连/轮询补齐展示） */
+  reasoning?: string;
   error?: string;
   type?: string;
   label?: string;
@@ -46,6 +48,8 @@ interface TaskSubmitBody {
   system: string;
   user: string;
   deviceId: string;
+  /** 深度思考：true 时服务端启用思考模式（thinking.type=enabled）并回传思考过程 */
+  thinking?: boolean;
   /** 附件（图片/文档/拍照）：服务端据此构造多模态消息 */
   attachments?: TaskAttachment[];
 }
@@ -145,7 +149,8 @@ export class GenTask {
 
   /** 提交生成任务；返回 taskId（成功后写入本地 pending 记录） */
   static async submit(ctx: common.UIAbilityContext, type: string, label: string,
-    system: string, user: string, attachments?: AttachFile[]): Promise<string> {
+    system: string, user: string, attachments?: AttachFile[],
+    thinking?: boolean): Promise<string> {
     const dev = await GenTask.deviceId(ctx);
     const body: TaskSubmitBody = {
       type: type,
@@ -154,6 +159,9 @@ export class GenTask {
       user: user,
       deviceId: dev
     };
+    if (thinking === true) {
+      body.thinking = true;
+    }
     if (attachments !== undefined && attachments.length > 0) {
       body.attachments = AttachService.toTask(attachments);
     }

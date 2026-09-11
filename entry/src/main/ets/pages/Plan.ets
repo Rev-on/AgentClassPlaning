@@ -17,6 +17,8 @@ import { ResultPanel } from '../common/components/ResultPanel';
 import { RichBox } from '../common/components/RichBox';
 import { AttachBar } from '../common/components/AttachBar';
 import { VoiceRemarkBox } from '../common/components/VoiceRemarkBox';
+import { ThinkSwitch, ThinkPanel } from '../common/components/ThinkPanel';
+import { AppSettings } from '../common/AppSettings';
 import { AttachFile } from '../common/AttachTypes';
 import { RichHtml } from '../common/RichHtml';
 
@@ -31,6 +33,10 @@ export struct PlanContent {
   /** 附件（图片/文档/拍照），随生成请求一起提交 */
   @State attachFiles: AttachFile[] = [];
   @State loading: boolean = false;
+  /** 深度思考过程全文（开启深度思考生成时实时更新；空表示本次未产生思考过程） */
+  @State thinkText: string = '';
+  /** 思考过程是否展开（生成中展开实时滚动，生成完成后自动折叠，点击标题可再次展开） */
+  @State thinkExpanded: boolean = true;
   @State result: string = '';
   /** 生成会话恢复（离开页面后重进仍显示生成中/结果） */
   private sessSub: number = -1;
@@ -122,6 +128,9 @@ export struct PlanContent {
     this.stopRequested = false;
     this.loading = true;
     this.result = '';
+    // 深度思考：清空上一次的思考过程并展开（生成中实时滚动展示）
+    this.thinkText = '';
+    this.thinkExpanded = true;
     // 开始新的生成：清除旧草稿，避免旧结果回魂
     PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
@@ -134,7 +143,12 @@ export struct PlanContent {
         ctx: getContext(this) as common.UIAbilityContext,
         type: 'plan',
         label: I18n.t('page.plan'),
-        attachments: this.attachFiles
+        attachments: this.attachFiles,
+        // 深度思考：按当前开关决定本次是否使用思考模式（默认关闭＝快速模式）
+        thinking: AppStorage.get<boolean>(AppSettings.KEY_THINK) === true
+      }, (think: string): void => {
+        // 思考过程实时更新（服务端按"当前全文"语义回传，直接覆盖即可）
+        this.thinkText = think;
       });
       if (this.stopRequested) {
         // 用户主动停止：保留已生成的部分文本，不覆盖、不入历史
@@ -149,6 +163,8 @@ export struct PlanContent {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
+      // 生成结束（完成/失败/停止）：思考过程自动折叠，用户点击标题可展开查看
+      this.thinkExpanded = false;
     }
   }
 
@@ -169,6 +185,8 @@ export struct PlanContent {
     AiService.stop(this.genKey());
     GenSession.clear(this.genKey());
     this.loading = false;
+    // 停止生成后思考过程同样自动折叠
+    this.thinkExpanded = false;
   }
 
   /** 跳转课件大纲页，并把刚生成的教案富文本作为导入内容传递过去 */
@@ -280,6 +298,9 @@ export struct PlanContent {
 
         // 附件：+ 号选择图片/文档/拍照（上限 10）
         AttachBar({ files: $attachFiles, disabled: this.loading })
+
+        // 深度思考开关：开启后本次生成走思考模式（模型先推理再作答），思考过程实时展示
+        ThinkSwitch()
         }
         .width('100%')
         .enabled(!this.loading)
@@ -333,6 +354,17 @@ export struct PlanContent {
       .padding(16)
       .backgroundColor(this.col('card'))
       .borderRadius(14)
+
+      // 深度思考过程：灰色小字实时滚动；生成完成后自动折叠，点击标题可展开查看
+      if (this.thinkText !== '') {
+        ThinkPanel({
+          text: this.thinkText,
+          expanded: $thinkExpanded,
+          running: this.loading
+        })
+          .width('100%')
+          .margin({ top: 10 })
+      }
 
       if (this.bottomResult) {
         // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区

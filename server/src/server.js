@@ -23,6 +23,7 @@ const http = require('http');
 const https = require('https');
 const tasks = require('./tasks');
 const push = require('./push');
+const rag = require('./rag');
 
 /** 消息推送总开关：客户端已取消通知/推送功能，默认关闭；如需重新启用设环境变量 PUSH_ENABLED=1 */
 const PUSH_ENABLED = process.env.PUSH_ENABLED === '1';
@@ -39,6 +40,8 @@ const TLS_ENABLED = process.env.TLS_ENABLED === undefined
 const HTTP_PORT = Number(process.env.HTTP_PORT || 0);
 const UPSTREAM = process.env.UPSTREAM_URL || 'https://api.deepseek.com/chat/completions';
 const MODEL = process.env.MODEL || 'deepseek-flash';
+// 深度思考强度（仅当客户端开启"深度思考"时生效）：high | max
+const THINK_EFFORT = process.env.THINKING_EFFORT || 'high';
 const API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const PROXY_TOKEN = process.env.PROXY_TOKEN || '';
 const TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 600000);
@@ -99,6 +102,10 @@ async function relay(req, res) {
   const out = Object.assign({}, body);
   if (out.stream === undefined) {
     out.stream = false; // 默认非流式（教案等长文本场景）
+  }
+  // 深度思考：客户端只需传 thinking.type，思考强度由服务端统一补齐
+  if (out.thinking && out.thinking.type === 'enabled' && out.reasoning_effort === undefined) {
+    out.reasoning_effort = THINK_EFFORT;
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -184,7 +191,9 @@ app.post('/api/chat', checkToken, (req, res) => {
   }
   // 直连回退路径同样支持附件（图片走多模态，文档文本并入 user 内容）
   const relayAtts = normalizeAttachments(data.attachments);
-  messages.push({ role: 'user', content: buildUserContent(user, relayAtts) });
+  // 同样挂载新课标依据（缺省从 user 文本解析学科/年级）
+  const relayRag = ragFor(user, relayAtts, data.subject, data.grade);
+  messages.push({ role: 'user', content: buildUserContent(user, relayAtts, relayRag ? relayRag.block : '') });
   req.body = Object.assign({}, data, { messages: messages });
   relay(req, res);
 });
@@ -286,7 +295,7 @@ function normalizeAttachments(raw) {
  *  说明：DeepSeek 视觉能力仅 vision 模型可用，image_url 支持 data URL（见官方 Vision 指南）；
  *        实测若不显式要求"必须使用附件"，模型容易只按文字要求作答而忽略附件内容，故此处注入强指令。
  */
-function buildUserContent(user, atts) {
+function buildUserContent(user, atts, ragBlock) {
   const images = atts.filter((a) => a.kind === 'image');
   const texts = atts.filter((a) => a.kind === 'text');
   const files = atts.filter((a) => a.kind === 'file');
@@ -317,6 +326,10 @@ function buildUserContent(user, atts) {
       text += '\n\n【附件：' + a.name + '】（该格式暂不支持内容解析，请结合文件名与用户描述理解）';
     }
   }
+  // 新课标 RAG 依据块放在最后：最终指令靠后，模型遵循度更高
+  if (ragBlock && ragBlock !== '') {
+    text += '\n\n' + ragBlock;
+  }
   if (images.length === 0) {
     return text;
   }
@@ -328,10 +341,51 @@ function buildUserContent(user, atts) {
   return parts;
 }
 
+/** 附件文本汇总（仅取文档类附件，用于 RAG 查询扩展） */
+function attachmentsText(atts) {
+  let s = '';
+  for (const a of atts) {
+    if (a.kind === 'text' && a.text) {
+      s += ' ' + a.text.slice(0, 1500);
+    }
+  }
+  return s;
+}
+
+/**
+ * 为一次生成请求检索新课标依据
+ * @returns {{block:string, info:object}|null}
+ */
+function ragFor(user, atts, subject, grade) {
+  if (!rag.isReady()) {
+    return null;
+  }
+  try {
+    const res = rag.buildBlock({
+      user: user,
+      subject: subject,
+      grade: grade,
+      extraText: attachmentsText(atts)
+    });
+    if (res && res.info) {
+      console.log('[rag] 命中 学科=' + (res.info.subjectName || '未识别') +
+        ' 学段=' + (res.info.stage || '-') + ' 年级=' + (res.info.grade || '-') +
+        ' 条目=' + res.info.hits.length + ' 注入=' + res.info.blockChars + '字' +
+        ' 路由=' + (res.info.source || '-'));
+    }
+    return res;
+  } catch (e) {
+    console.error('[rag] 检索异常：' + (e && e.message ? e.message : String(e)));
+    return null;
+  }
+}
+
 /** taskId -> { ctrl: AbortController, manual: boolean }（取消任务用） */
 const taskAborters = new Map();
 /** taskId -> Set<res>（feed 订阅连接） */
 const feedSubs = new Map();
+/** taskId -> 运行中已累积的思考文本（深度思考；供 feed 重连时补齐） */
+const taskReasoning = new Map();
 
 function feedSend(taskId, event, obj) {
   const subs = feedSubs.get(taskId);
@@ -364,8 +418,12 @@ function feedClose(taskId) {
   taskAborters.delete(taskId);
 }
 
-/** 流式调用 DeepSeek：完整返回全文，同时把每个增量片段回调 onDelta（可被 cancel 中断） */
-async function fetchDeepSeekStreamed(task, onDelta) {
+/**
+ * 流式调用 DeepSeek：完整返回 { content, reasoning }，同时把每个增量片段回调
+ * onDelta（正文）/ onThink（思考过程），可被 cancel 中断。
+ * task.thinking === true 时启用思维链（深度思考），否则关闭（快速模式）。
+ */
+async function fetchDeepSeekStreamed(task, onDelta, onThink) {
   if (!API_KEY) {
     throw new Error('服务端未配置 DEEPSEEK_API_KEY');
   }
@@ -379,8 +437,17 @@ async function fetchDeepSeekStreamed(task, onDelta) {
   const decoder = new TextDecoder('utf-8');
   let buf = '';
   let full = '';
+  let reason = '';
   let prev = 0;
+  let prevR = 0;
   const flushRemain = () => {
+    if (reason.length > prevR) {
+      const piece = reason.slice(prevR);
+      prevR = reason.length;
+      if (onThink) {
+        onThink(piece);
+      }
+    }
     if (full.length > prev) {
       const piece = full.slice(prev);
       prev = full.length;
@@ -389,23 +456,45 @@ async function fetchDeepSeekStreamed(task, onDelta) {
   };
   try {
     const atts = taskAttachments.get(task.id) || [];
+    // 新课标依据：题目/备注 -> 学科索引路由 -> 内容索引检索
+    const ragRes = ragFor(String(task.user || ''), atts, task.subject, task.grade);
+    if (ragRes && ragRes.info) {
+      tasks.patch(task.id, { rag: ragRes.info });
+    }
     const messages = [];
     if (task.system && String(task.system).trim() !== '') {
-      messages.push({ role: 'system', content: task.system });
+      let sys = String(task.system);
+      if (ragRes && !(ragRes.info && ragRes.info.notIndexed)) {
+        sys += '\n\n【硬性要求】本次请求附带了《义务教育课程标准（2022年版）》的检索片段'
+          + '（见用户消息末尾的"课标依据"块）。教学设计必须以该课标为依据，'
+          + '不得使用其他版本的课标或编造课标条文。';
+      } else if (ragRes) {
+        sys += '\n\n【硬性要求】本学科的课标未纳入系统课标库，'
+          + '严禁编造或凭记忆引用该学科课标条文（详见用户消息末尾的说明）。';
+      }
+      messages.push({ role: 'system', content: sys });
     }
-    messages.push({ role: 'user', content: buildUserContent(String(task.user || ''), atts) });
+    messages.push({
+      role: 'user',
+      content: buildUserContent(String(task.user || ''), atts, ragRes ? ragRes.block : '')
+    });
+    const payload = {
+      model: MODEL,
+      messages: messages,
+      stream: true,
+      // 深度思考开关：关闭时跳过思维链直接输出（快速模式，响应更快）
+      thinking: { type: task.thinking === true ? 'enabled' : 'disabled' }
+    };
+    if (task.thinking === true) {
+      payload.reasoning_effort = THINK_EFFORT;
+    }
     const resp = await fetch(UPSTREAM, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + API_KEY
       },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: messages,
-        stream: true,
-        thinking: { type: 'disabled' }
-      }),
+      body: JSON.stringify(payload),
       signal: ab.ctrl.signal
     });
     if (!resp.ok) {
@@ -442,10 +531,16 @@ async function fetchDeepSeekStreamed(task, onDelta) {
             }
             try {
               const j = JSON.parse(data);
-              const d = j && j.choices && j.choices[0] && j.choices[0].delta &&
-                j.choices[0].delta.content;
-              if (typeof d === 'string') {
-                full += d;
+              const delta = j && j.choices && j.choices[0] && j.choices[0].delta;
+              if (!delta) {
+                continue;
+              }
+              // 思考过程（深度思考开启时才有）：与正文分流，单独回传
+              if (typeof delta.reasoning_content === 'string') {
+                reason += delta.reasoning_content;
+              }
+              if (typeof delta.content === 'string') {
+                full += delta.content;
               }
             } catch (e) {
               // 忽略非 JSON 心跳/注释行
@@ -460,7 +555,7 @@ async function fetchDeepSeekStreamed(task, onDelta) {
     if (full.trim() === '') {
       throw new Error('上游未返回内容');
     }
-    return full;
+    return { content: full, reasoning: reason };
   } catch (e) {
     if (e && e.name === 'AbortError') {
       if (ab.manual) {
@@ -487,17 +582,29 @@ function runTask(taskId) {
   }
   tasks.enqueue(async () => {
     tasks.patch(taskId, { status: tasks.STATUS.RUNNING });
+    taskReasoning.set(taskId, '');
     try {
-      const content = await fetchDeepSeekStreamed(task, (d) => feedSend(taskId, 'chunk', { d: d }));
+      const res = await fetchDeepSeekStreamed(task,
+        (d) => feedSend(taskId, 'chunk', { d: d }),
+        (r) => {
+          // 思考过程实时滚动回传（客户端灰色小字展示，完成后自动折叠）
+          taskReasoning.set(taskId, (taskReasoning.get(taskId) || '') + r);
+          feedSend(taskId, 'think', { d: r });
+        });
+      const content = res.content;
+      const reasoning = res.reasoning || taskReasoning.get(taskId) || '';
       tasks.patch(taskId, {
         status: tasks.STATUS.DONE,
         content: content,
+        reasoning: reasoning,
         finishedAt: Date.now(),
         error: ''
       });
-      console.log('[tasks] done id=' + taskId + ' type=' + task.type + ' len=' + content.length);
-      feedSend(taskId, 'done', { c: content });
+      console.log('[tasks] done id=' + taskId + ' type=' + task.type +
+        ' len=' + content.length + ' think=' + reasoning.length);
+      feedSend(taskId, 'done', { c: content, r: reasoning });
       feedClose(taskId);
+      taskReasoning.delete(taskId);
       // 完成通知（默认关闭：客户端已取消消息通知功能；仅当 PUSH_ENABLED=1 时启用）
       if (PUSH_ENABLED) {
         if (task.liveView) {
@@ -521,12 +628,14 @@ function runTask(taskId) {
       tasks.patch(taskId, {
         status: tasks.STATUS.FAILED,
         content: '',
+        reasoning: taskReasoning.get(taskId) || '',
         finishedAt: Date.now(),
         error: msg
       });
       console.error('[tasks] failed id=' + taskId + ' err=' + msg);
       feedSend(taskId, cancelled ? 'cancelled' : 'error', { m: msg });
       feedClose(taskId);
+      taskReasoning.delete(taskId);
       if (PUSH_ENABLED) {
         await push.sendAlert({
           token: tasks.tokenOf(task.deviceId),
@@ -555,7 +664,10 @@ app.get('/api/task/:id/feed', checkToken, (req, res) => {
     'X-Accel-Buffering': 'no'
   });
   if (t.status === tasks.STATUS.DONE) {
-    res.write('event: done\ndata: ' + JSON.stringify({ c: t.content || '' }) + '\n\n');
+    if (t.reasoning) {
+      res.write('event: think\ndata: ' + JSON.stringify({ d: t.reasoning }) + '\n\n');
+    }
+    res.write('event: done\ndata: ' + JSON.stringify({ c: t.content || '', r: t.reasoning || '' }) + '\n\n');
     res.end();
     return;
   }
@@ -565,6 +677,11 @@ app.get('/api/task/:id/feed', checkToken, (req, res) => {
     return;
   }
   res.write('event: open\ndata: {}\n\n');
+  // 重连补齐：把运行中已产生的思考过程先全量补发一次（客户端按增量追加展示）
+  const thinkSoFar = taskReasoning.get(id);
+  if (thinkSoFar) {
+    res.write('event: think\ndata: ' + JSON.stringify({ d: thinkSoFar }) + '\n\n');
+  }
   let subs = feedSubs.get(id);
   if (!subs) {
     subs = new Set();
@@ -634,7 +751,12 @@ app.post('/api/task', checkToken, (req, res) => {
     notifyTitle: typeof body.notifyTitle === 'string' ? body.notifyTitle : '',
     notifyBody: typeof body.notifyBody === 'string' ? body.notifyBody : '',
     notifyFailTitle: typeof body.notifyFailTitle === 'string' ? body.notifyFailTitle : '',
-    notifyFailBody: typeof body.notifyFailBody === 'string' ? body.notifyFailBody : ''
+    notifyFailBody: typeof body.notifyFailBody === 'string' ? body.notifyFailBody : '',
+    // 学科索引路由：客户端显式传学科/年级（缺省时服务端从 user 文本中的"学科："解析）
+    subject: typeof body.subject === 'string' ? body.subject : '',
+    grade: Number(body.grade) || 0,
+    // 深度思考开关：true 时启用思维链（reasoning_content 实时回传给客户端展示）
+    thinking: body.thinking === true
   });
   // 附件需在任务开始执行前入表（runTask 内部异步消费）
   const atts = normalizeAttachments(body.attachments);
@@ -700,6 +822,55 @@ app.post('/api/push/register', checkToken, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ===================== 新课标 RAG 索引（学科索引 + 内容索引） ===================== */
+
+// 检索调试：索引概况
+app.get('/api/rag/stats', checkToken, (req, res) => {
+  res.json({ ok: true, rag: rag.stats() });
+});
+
+// 检索调试：直接看某个查询命中了哪些课标条目（不调用模型）
+app.get('/api/rag/search', checkToken, (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  if (q.trim() === '') {
+    res.status(400).json({ error: { message: 'q 不能为空' } });
+    return;
+  }
+  const subject = typeof req.query.subject === 'string' ? req.query.subject : '';
+  const grade = Number(req.query.grade) || 0;
+  const info = rag.parseRequest(q, subject);
+  const hits = rag.search(q, {
+    subjectId: info.subjectId, stage: info.stage, grade: grade || info.grade, topK: Number(req.query.topK) || 10
+  });
+  res.json({
+    ok: true,
+    parsed: info,
+    hits: hits.map((h) => ({
+      score: Math.round(h.score * 100) / 100, subject: h.c.s, sec: h.c.sec,
+      page: h.c.p, doc: h.c.d, text: h.c.t.slice(0, 400)
+    }))
+  });
+});
+
+// 检索调试：预览最终注入模型的"课标依据"块
+app.get('/api/rag/block', checkToken, (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  if (q.trim() === '') {
+    res.status(400).json({ error: { message: 'q 不能为空' } });
+    return;
+  }
+  const out = rag.buildBlock({
+    user: q,
+    subject: typeof req.query.subject === 'string' ? req.query.subject : '',
+    grade: Number(req.query.grade) || 0
+  });
+  if (!out) {
+    res.json({ ok: true, hit: false, block: '' });
+    return;
+  }
+  res.json({ ok: true, hit: true, info: out.info, block: out.block });
+});
+
 // 统一异常兜底
 app.use((err, req, res, next) => {
   console.error('[rev-ai-proxy] unhandled url=' + req.url + ' err=' +
@@ -708,6 +879,9 @@ app.use((err, req, res, next) => {
 });
 
 /* ===================== 启动：证书就绪则 HTTPS，否则 HTTP 回退 ===================== */
+// 先载入新课标 RAG 索引（学科索引 + 内容索引），失败不影响主服务启动
+rag.load();
+
 function onListen(scheme) {
   console.log('[rev-ai-proxy] listening on ' + scheme + '://' + HOST + ':' + PORT);
   if (!API_KEY) {

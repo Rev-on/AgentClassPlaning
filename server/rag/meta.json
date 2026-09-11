@@ -1,0 +1,108 @@
+{
+ "builtAt": "2026-09-11 20:35:22",
+ "standard": "义务教育课程方案和课程标准（2022年版）",
+ "source": "teching/ 目录下 11 份 PDF（扫描件，经 OCR 提取文字）",
+ "totalChunks": 1428,
+ "totalPages": 1428,
+ "auxChunks": 56,
+ "files": [
+  {
+   "file": "义务教育课程方案（2022年版）.pdf",
+   "pages": 23,
+   "tocSkipped": 0,
+   "chunks": 18,
+   "md5": "e2f32579571b"
+  },
+  {
+   "file": "义务教育道德与法治课程标准（2022年版）.pdf",
+   "pages": 73,
+   "tocSkipped": 0,
+   "chunks": 71,
+   "md5": "dad4672cdb63"
+  },
+  {
+   "file": "义务教育语文课程标准（2022年版）.pdf",
+   "pages": 107,
+   "tocSkipped": 2,
+   "chunks": 103,
+   "md5": "072f33109588"
+  },
+  {
+   "file": "义务教育英语课程标准（2022年版）.pdf",
+   "pages": 197,
+   "tocSkipped": 4,
+   "chunks": 201,
+   "md5": "dede025d2541"
+  },
+  {
+   "file": "义务教育数学课程标准（2022年版）.pdf",
+   "pages": 188,
+   "tocSkipped": 1,
+   "chunks": 194,
+   "md5": "383524d32fd3"
+  },
+  {
+   "file": "义务教育历史课程标准（2022年版）.pdf",
+   "pages": 85,
+   "tocSkipped": 1,
+   "chunks": 90,
+   "md5": "44626a33cf20"
+  },
+  {
+   "file": "义务教育生物学课程标准（2022年版）.pdf",
+   "pages": 76,
+   "tocSkipped": 0,
+   "chunks": 75,
+   "md5": "c66d36087521"
+  },
+  {
+   "file": "义务教育艺术课程标准（2022年版）.pdf",
+   "pages": 130,
+   "tocSkipped": 1,
+   "chunks": 128,
+   "md5": "fa5ddbc88af0"
+  },
+  {
+   "file": "义务教育科学课程标准（2022年版）.pdf",
+   "pages": 191,
+   "tocSkipped": 2,
+   "chunks": 191,
+   "md5": "6cb9ec90e094"
+  },
+  {
+   "file": "义务教育物理课程标准（2022年版）.pdf",
+   "pages": 71,
+   "tocSkipped": 0,
+   "chunks": 72,
+   "md5": "921bfb3cbfaf"
+  },
+  {
+   "file": "义务教育化学课程标准（2022年版）.pdf",
+   "pages": 84,
+   "tocSkipped": 3,
+   "chunks": 80,
+   "md5": "d122a848048e"
+  },
+  {
+   "file": "义务教育地理课程标准（2022年版）.pdf",
+   "pages": 64,
+   "tocSkipped": 1,
+   "chunks": 64,
+   "md5": "fac11214df39"
+  },
+  {
+   "file": "义务教育劳动课程标准（2022年版）.pdf",
+   "pages": 66,
+   "tocSkipped": 2,
+   "chunks": 65,
+   "md5": "79ba046bd04d"
+  },
+  {
+   "file": "义务教育信息科技课程标准（2022年版）.pdf",
+   "pages": 73,
+   "tocSkipped": 1,
+   "chunks": 76,
+   "md5": "50411361e292"
+  }
+ ]
+}

@@ -1,8 +1,8 @@
 /**
  * AI 服务：封装 DeepSeek 对话补全接口（非流式，稳定性优先）
- *  - thinking 已禁用（快速模式），stream 固定 false
+ *  - 默认 thinking 禁用（快速模式）；页面开启"深度思考"后走 thinking.type=enabled 并实时回传思考过程
+ *  - stream 固定 false（增量由服务端后台任务的 SSE feed 提供）
  *  - 偶发失败自动重试（最多 3 次），HTTP 200 但响应异常给出明确提示
- * @param onDelta 保留参数以兼容调用方，当前固定非流式不使用
  */
 import http from '@ohos.net.http';
 import common from '@ohos.app.ability.common';
@@ -21,6 +21,8 @@ import { I18n } from './I18n';
 interface ChatMessage {
   role: string;
   content: string;
+  /** 思考模式下的思维链内容（仅响应消息携带） */
+  reasoning_content?: string;
 }
 
 /** 任务模式参数（启用后生成走服务端后台任务，支持进程被杀后仍完成） */
@@ -34,9 +36,11 @@ export interface AiTaskOpts {
   gone?: () => boolean;
   /** 本次生成携带的附件（图片/文档/拍照），服务端按多模态处理 */
   attachments?: AttachFile[];
+  /** 深度思考：true 时启用思考模式（思维链），思考过程经 onThink 实时回调 */
+  thinking?: boolean;
 }
 
-/** 思考模式配置：type=disabled 关闭思维链（快速模式） */
+/** 思考模式配置：type=disabled 关闭思维链（快速模式），enabled 开启（深度思考） */
 interface ThinkingConfig {
   type: string;
 }
@@ -49,6 +53,8 @@ interface ChatRequest {
   max_tokens: number;
   stream: boolean;
   thinking: ThinkingConfig;
+  /** 思考强度（深度思考开启时由服务端统一补齐，此处仅透传） */
+  reasoning_effort?: string;
   /** 附件（图片/文档），服务端据此构造多模态消息 */
   attachments?: TaskAttachment[];
 }
@@ -142,9 +148,11 @@ export class AiService {
    * @param skipNote 为 true 时不追加"AI生成"尾注（如课件大纲 JSON 结构化输出）
    * @param opts 任务模式参数；传入 ctx 后自动使用"服务端后台任务"模式
    *             （提交即返回、可离开页面/杀进程，完成后通知并可在历史中查看）
+   * @param onThink 深度思考回调：思考过程全文（当前累计），仅在 opts.thinking=true 时有值
    */
   static async chat(systemPrompt: string, userPrompt: string, onDelta?: (partial: string) => void,
-    skipNote: boolean = false, opts?: AiTaskOpts): Promise<string> {
+    skipNote: boolean = false, opts?: AiTaskOpts,
+    onThink?: (partial: string) => void): Promise<string> {
     // 2in1 上下分屏（appDuo）：本次生成镜像发布到下半屏结果面板（busy=生成中）
     const duoBus: boolean = AiService.duoActive(opts);
     if (duoBus && opts !== undefined) {
@@ -178,7 +186,8 @@ export class AiService {
         // 提交前先登记活动项：确保"提交瞬间点停止"也能生效（此时 taskId 尚为空）
         AiService.active.set(opts.type, { taskId: '', sse: null, stopped: false });
         try {
-          const byTask: string = await AiService.chatByTask(systemPrompt, userPrompt, skipNote, onDelta, opts, ctl);
+          const byTask: string = await AiService.chatByTask(systemPrompt, userPrompt, skipNote, onDelta, opts, ctl,
+            onThink);
           if (AiService.consumeStop(opts.type)) {
             // 用户主动停止：半截文本已由页面保留；不写会话、不镜像、不入历史
             return byTask;
@@ -205,7 +214,8 @@ export class AiService {
       for (let attempt: number = 0; attempt < AiService.MAX_ATTEMPTS; attempt++) {
         try {
           const raw: string = await AiService.requestOnce(systemPrompt, userPrompt,
-            opts !== undefined ? opts.attachments : undefined);
+            opts !== undefined ? opts.attachments : undefined,
+            opts !== undefined && opts.thinking === true, onThink);
           const out: string = AiService.withAiNote(raw, skipNote);
           if (opts !== undefined) {
             AiService.mirrorDone(duoBus, opts, out);
@@ -255,9 +265,10 @@ export class AiService {
    * 页面销毁后（gone()=true）不订阅 feed，改为轮询静默入库；进程被杀则下次启动由 recover 静默接管。
    */
   private static async chatByTask(systemPrompt: string, userPrompt: string, skipNote: boolean,
-    onDelta: ((partial: string) => void) | undefined, opts: AiTaskOpts, ctl: TaskCtl): Promise<string> {
+    onDelta: ((partial: string) => void) | undefined, opts: AiTaskOpts, ctl: TaskCtl,
+    onThink?: (partial: string) => void): Promise<string> {
     const taskId: string = await GenTask.submit(opts.ctx, opts.type, opts.label, systemPrompt, userPrompt,
-      opts.attachments);
+      opts.attachments, opts.thinking === true);
     // 提交成功：服务端已接受任务并开始生成，此后任何任务态失败都不应回退直连重发
     ctl.accepted = true;
     // 登记到活动表：页面点"停止生成"时据此断开流并取消服务端任务
@@ -276,7 +287,8 @@ export class AiService {
     if (!goneFlag && onDelta !== undefined) {
       const feed = await AiService.feedOnce(taskId, onDelta,
         (): boolean => act.stopped,
-        (c: SseClient): void => { act.sse = c; });
+        (c: SseClient): void => { act.sse = c; },
+        onThink);
       if (act.stopped) {
         // 用户已停止：结束任务、清 pending，半截文本由页面保留
         await GenTask.clearPending(opts.ctx);
@@ -316,6 +328,10 @@ export class AiService {
         }
         status = t.status;
         content = t.content !== undefined ? t.content : '';
+        // 深度思考：轮询兜底时把已完成任务的思考过程补齐展示（全文语义）
+        if (onThink !== undefined && t.reasoning !== undefined && t.reasoning !== '') {
+          onThink(t.reasoning);
+        }
       } catch (e) {
         continue; // 网络抖动：跳过本轮继续轮询
       }
@@ -362,9 +378,11 @@ export class AiService {
   private static async feedOnce(taskId: string,
     onDelta: (partial: string) => void,
     isStopped?: () => boolean,
-    onClient?: (c: SseClient) => void): Promise<FeedResult> {
+    onClient?: (c: SseClient) => void,
+    onThink?: (partial: string) => void): Promise<FeedResult> {
     return new Promise<FeedResult>((resolve) => {
       let acc: string = '';
+      let thinkAcc: string = '';
       let settled: boolean = false;
       let stallTimer: number = -1;
       let cl: SseClient | null = null;
@@ -414,9 +432,22 @@ export class AiService {
               acc += d;
               onDelta(acc);
             }
+          } else if (evt.event === 'think') {
+            // 深度思考过程：按"当前全文"语义回调（服务端重连时会补发全量）
+            const d: string = obj !== null && obj['d'] !== undefined ? String(obj['d']) : '';
+            if (d !== '') {
+              thinkAcc += d;
+              if (onThink !== undefined) {
+                onThink(thinkAcc);
+              }
+            }
           } else if (evt.event === 'done') {
             const c: string = obj !== null && obj['c'] !== undefined && String(obj['c']) !== ''
               ? String(obj['c']) : acc;
+            const r: string = obj !== null && obj['r'] !== undefined ? String(obj['r']) : '';
+            if (r !== '' && onThink !== undefined) {
+              onThink(r);
+            }
             settle(true, c);
           } else if (evt.event === 'error' || evt.event === 'cancelled') {
             settle(false, ''); // 交给轮询兜底读取失败/取消详情
@@ -464,13 +495,14 @@ export class AiService {
 
   /** 单次请求（attachments 为本次生成携带的附件，服务端负责多模态拼装） */
   private static async requestOnce(systemPrompt: string, userPrompt: string,
-    attachments?: AttachFile[]): Promise<string> {
+    attachments?: AttachFile[], thinking?: boolean,
+    onThink?: (partial: string) => void): Promise<string> {
     const httpRequest = http.createHttp();
     try {
       const response = await httpRequest.request(ApiConfig.activeBaseUrl(), {
         method: http.RequestMethod.POST,
         header: AiService.buildHeader(),
-        extraData: AiService.buildBody(systemPrompt, userPrompt, attachments),
+        extraData: AiService.buildBody(systemPrompt, userPrompt, attachments, thinking),
         connectTimeout: ApiConfig.CONNECT_TIMEOUT,
         readTimeout: ApiConfig.READ_TIMEOUT
       });
@@ -491,6 +523,11 @@ export class AiService {
       if (code === 200) {
         if (data.choices !== undefined && data.choices.length > 0) {
           const content: string = data.choices[0].message.content;
+          // 深度思考（非流式回退路径）：思维链一次性回传
+          const rc: string | undefined = data.choices[0].message.reasoning_content;
+          if (rc !== undefined && rc !== '' && onThink !== undefined) {
+            onThink(rc);
+          }
           if (content !== undefined && content !== '') {
             return content;
           }
@@ -519,7 +556,8 @@ export class AiService {
     return h;
   }
 
-  private static buildBody(systemPrompt: string, userPrompt: string, attachments?: AttachFile[]): string {
+  private static buildBody(systemPrompt: string, userPrompt: string, attachments?: AttachFile[],
+    thinking?: boolean): string {
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
@@ -530,8 +568,9 @@ export class AiService {
       temperature: ApiConfig.TEMPERATURE,
       max_tokens: ApiConfig.MAX_TOKENS,
       stream: false,
-      // 关闭思考模式（快速模式）：跳过思维链直接输出，缩短响应时间
-      thinking: { type: 'disabled' }
+      // thinking=disabled 关闭思考模式（快速模式）：跳过思维链直接输出，缩短响应时间
+      // thinking=enabled 开启深度思考：模型先推理再作答（更严谨，耗时更长）
+      thinking: { type: thinking === true ? 'enabled' : 'disabled' }
     };
     if (attachments !== undefined && attachments.length > 0) {
       req.attachments = AttachService.toTask(attachments);

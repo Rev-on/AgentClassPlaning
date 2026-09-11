@@ -24,6 +24,8 @@ export class AppSettings {
   private static readonly KEY_DUO: string = 'duoLayout';
   /** 应用内字号倍率（作用于全部 fp 文字；默认 1.0=标准） */
   private static readonly KEY_FONT_SCALE: string = 'fontScale';
+  /** 深度思考开关（启用后生成走思考模式，思考过程实时展示；默认关闭＝快速模式） */
+  static readonly KEY_THINK: string = 'deepThink';
 
   /** 字号档位倍率（对应设置页：小 / 标准 / 大 / 特大） */
   static readonly FONT_PRESETS: number[] = [0.9, 1.0, 1.15, 1.3];
@@ -39,6 +41,7 @@ export class AppSettings {
     let manual: boolean = false;
     let duo: string = 'auto';
     let fontScale: number = 1.0;
+    let think: boolean = false;
     try {
       const store = await preferences.getPreferences(context, AppSettings.STORE);
       const hasLang: boolean = await store.has(AppSettings.KEY_LANG);
@@ -46,6 +49,7 @@ export class AppSettings {
       const tv = await store.get(AppSettings.KEY_THEME, 'system');
       const av = await store.get(AppSettings.KEY_AUTOSAVE, true);
       const fv = await store.get(AppSettings.KEY_FONT_SCALE, 1.0);
+      const thv = await store.get(AppSettings.KEY_THINK, false);
       // 语言：用户手动选过（存在保存值）用保存值；否则跟随系统语言
       manual = hasLang;
       lang = manual ? AppSettings.normalizeLang(lv as string) : AppSettings.systemLang();
@@ -54,6 +58,7 @@ export class AppSettings {
       // 结果屏布局已改为全自动：不再读取历史保存的覆盖值，避免旧值（强开/关闭）遗留后无法修改
       duo = 'auto';
       fontScale = AppSettings.normalizeFontScale(fv as number);
+      think = (thv as boolean) === true;
     } catch (e) {
       // 默认值：主题跟随系统；语言跟随系统语言
       lang = AppSettings.systemLang();
@@ -65,6 +70,7 @@ export class AppSettings {
     AppStorage.setOrCreate(AppSettings.KEY_AUTOSAVE, autoSave);
     AppStorage.setOrCreate(AppSettings.KEY_DUO, duo);
     AppStorage.setOrCreate(AppSettings.KEY_FONT_SCALE, fontScale);
+    AppStorage.setOrCreate(AppSettings.KEY_THINK, think);
     AppSettings.applyColorMode(context, theme);
     AppSettings.applyFontScale(context, fontScale);
   }
@@ -150,6 +156,18 @@ export class AppSettings {
     await store.put(AppSettings.KEY_AUTOSAVE, on);
     await store.flush();
     AppStorage.setOrCreate(AppSettings.KEY_AUTOSAVE, on);
+  }
+
+  /** 保存"深度思考"开关并立即生效（下次进入保持） */
+  static async saveThink(context: common.UIAbilityContext, on: boolean): Promise<void> {
+    AppStorage.setOrCreate(AppSettings.KEY_THINK, on);
+    try {
+      const store = await preferences.getPreferences(context, AppSettings.STORE);
+      await store.put(AppSettings.KEY_THINK, on);
+      await store.flush();
+    } catch (e) {
+      // 持久化失败不阻塞应用（本次会话内仍生效）
+    }
   }
 
   /** 字号倍率白名单校验（非法值/越界值收敛到允许范围） */

@@ -52,7 +52,7 @@ function newId() {
 }
 
 /** 创建任务记录并返回 */
-function create({ deviceId, type, label, system, user, notifySeed, notifyTitle, notifyBody, notifyFailTitle, notifyFailBody }) {
+function create({ deviceId, type, label, system, user, notifySeed, notifyTitle, notifyBody, notifyFailTitle, notifyFailBody, subject, grade, thinking }) {
   const task = {
     id: newId(),
     deviceId: String(deviceId || ''),
@@ -65,11 +65,18 @@ function create({ deviceId, type, label, system, user, notifySeed, notifyTitle, 
     notifyBody: String(notifyBody || ''),
     notifyFailTitle: String(notifyFailTitle || ''),
     notifyFailBody: String(notifyFailBody || ''),
+    // RAG 学科路由用（客户端可显式传学科/年级；缺省时服务端从 user 文本解析）
+    subject: String(subject || ''),
+    grade: Number(grade || 0),
+    // 深度思考：true 时启用思维链，思考过程存于 reasoning（供重连/轮询补齐展示）
+    thinking: thinking === true,
+    reasoning: '',
     status: STATUS.PENDING,
     createdAt: Date.now(),
     finishedAt: 0,
     content: '',
-    error: ''
+    error: '',
+    rag: null
   };
   tasks.set(task.id, task);
   persist();
