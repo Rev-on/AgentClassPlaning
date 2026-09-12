@@ -784,4 +784,5 @@ struct Index {
     .backgroundColor(this.col('bg'))
     }
   }
-}
+
+  }

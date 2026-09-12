@@ -67,9 +67,134 @@ export class PptxExporter {
     return slides;
   }
 
-  /** 导出课件大纲 JSON 为 .pptx 粗稿（选择保存位置） */
+  /** 提取标签属性值（形如 name="value"，兼容单双引号）；未找到返回空串 */
+  private static htmlAttr(tag: string, name: string): string {
+    const key: string = name + '="';
+    const ks: number = tag.indexOf(key);
+    if (ks >= 0) {
+      const v0: number = ks + key.length;
+      const v1: number = tag.indexOf('"', v0);
+      if (v1 >= 0) {
+        return tag.substring(v0, v1);
+      }
+    }
+    const key1: string = name + '=\'';
+    const ks1: number = tag.indexOf(key1);
+    if (ks1 >= 0) {
+      const v0: number = ks1 + key1.length;
+      const v1: number = tag.indexOf('\'', v0);
+      if (v1 >= 0) {
+        return tag.substring(v0, v1);
+      }
+    }
+    return '';
+  }
+
+  /** 提取标签名（<h1>、<p>、<section …> 等） */
+  private static htmlTagName(open: string): string {
+    let e: number = 1;
+    while (e < open.length && open[e] !== ' ' && open[e] !== '>' && open[e] !== '/') {
+      e++;
+    }
+    return open.substring(1, e).toLowerCase();
+  }
+
+  /** 剥离一段文本中的全部标签 */
+  private static htmlStrip(s: string): string {
+    return s.replace(/<[^>]*>/g, '');
+  }
+
+  /** 提取 slide 内部 h1/h2/h3/p 的文本作为要点（按出现顺序收集） */
+  private static htmlTexts(inner: string): string[] {
+    const out: string[] = [];
+    let i: number = 0;
+    while (i < inner.length) {
+      const lt: number = inner.indexOf('<', i);
+      if (lt < 0) {
+        break;
+      }
+      const gt: number = inner.indexOf('>', lt);
+      if (gt < 0) {
+        break;
+      }
+      const name: string = PptxExporter.htmlTagName(inner.substring(lt, gt + 1));
+      const close: string = (name === 'p' || name === 'h1' || name === 'h2' || name === 'h3')
+        ? '</' + name + '>'
+        : '';
+      if (close === '') {
+        i = gt + 1;
+        continue;
+      }
+      const ce: number = inner.indexOf(close, gt + 1);
+      if (ce < 0) {
+        i = gt + 1;
+        continue;
+      }
+      const text: string = PptxExporter.htmlStrip(inner.substring(gt + 1, ce)).trim();
+      if (text !== '') {
+        out.push(text);
+      }
+      i = ce + close.length;
+    }
+    return out;
+  }
+
+  /**
+   * 从 HTML 课件文档中解析逐页幻灯片（统一 CSS + 逐页 <section class="slide">）。
+   * 每页以 data-title/data-type/data-visual 属性与内部 h1/h2/h3/p 文本构成 CourseSlide；
+   * 未找到任何 slide 时返回 null。
+   */
+  static parseHtmlCourseware(html: string): CourseSlide[] | null {
+    const slides: CourseSlide[] = [];
+    const openTag: string = '<section';
+    const closeTag: string = '</section>';
+    let idx: number = 0;
+    while (idx < html.length) {
+      const s: number = html.indexOf(openTag, idx);
+      if (s < 0) {
+        break;
+      }
+      const gt: number = html.indexOf('>', s);
+      if (gt < 0) {
+        break;
+      }
+      const tag: string = html.substring(s, gt + 1);
+      // 仅收集 class 含 slide 的 <section>，跳过普通 section
+      if (tag.indexOf('class="slide"') < 0 && tag.indexOf('class="slide ') < 0) {
+        idx = gt + 1;
+        continue;
+      }
+      const cs: number = gt + 1;
+      const e: number = html.indexOf(closeTag, cs);
+      if (e < 0) {
+        break;
+      }
+      const inner: string = html.substring(cs, e);
+      const title: string = PptxExporter.htmlAttr(tag, 'data-title');
+      const type: string = PptxExporter.htmlAttr(tag, 'data-type');
+      const visual: string = PptxExporter.htmlAttr(tag, 'data-visual');
+      const points: string[] = PptxExporter.htmlTexts(inner);
+      slides.push({
+        page: slides.length + 1,
+        type: type,
+        title: title,
+        points: points,
+        visual: visual
+      });
+      idx = e + closeTag.length;
+    }
+    if (slides.length === 0) {
+      return null;
+    }
+    return slides;
+  }
+
+  /** 导出课件为 .pptx 粗稿（兼容 HTML 课件与旧 JSON 大纲两种形态；选择保存位置） */
   static async exportPptx(context: common.UIAbilityContext, json: string, fileName: string): Promise<void> {
-    const slides: CourseSlide[] | null = PptxExporter.parseSlides(json);
+    let slides: CourseSlide[] | null = PptxExporter.parseHtmlCourseware(json);
+    if (slides === null) {
+      slides = PptxExporter.parseSlides(json);
+    }
     if (slides === null || slides.length === 0) {
       throw new Error(I18n.t('err.pptxJson'));
     }

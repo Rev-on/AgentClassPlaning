@@ -20,6 +20,7 @@ import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 import { RichBox } from '../common/components/RichBox';
 import { RichHtml } from '../common/RichHtml';
+import { SafeInsets } from '../common/SafeInsets';
 
 @Component
 export struct ReportContent {
@@ -35,15 +36,32 @@ export struct ReportContent {
   @State thinkText: string = '';
   /** 思考过程是否展开（生成中展开实时滚动，生成完成后自动折叠，点击标题可再次展开） */
   @State thinkExpanded: boolean = true;
+  @State thinkRunning: boolean = false;
   @State result: string = '';
   /** 生成会话恢复（离开页面后重进仍显示生成中/结果） */
   private sessSub: number = -1;
   /** 实时预览滚动控制器（生成中自动滚到最底部） */
   private liveScroll: Scroller = new Scroller();
+  /** 完成后整页滚动控制器（自动下滑到结果预览） */
+  private doneScroll: Scroller = new Scroller();
+  /** 结果预览在整页滚动内容中的顶部偏移（用于完成后自动定位） */
+  private resultTop: number = 0;
   /** 用户是否点击了"停止生成" */
   private stopRequested: boolean = false;
 
+  /** 生成完成后自动下滑到结果预览顶部（输入卡片滑出视口，预览填充可见区域并保持可下滑查看剩余内容） */
+  private autoShowResult(): void {
+    if (this.result === '') {
+      return;
+    }
+    this.doneScroll.scrollTo({ xOffset: 0, yOffset: Math.max(0, this.resultTop), animation: { duration: 350 } });
+  }
+
   aboutToAppear(): void {
+    // 读取顶部状态栏/刘海避让高度：整页滚动时预留顶部安全区
+    SafeInsets.topInset(getContext(this) as common.UIAbilityContext).then((v: number): void => {
+      this.topInset = v;
+    });
     this.resumeGenSession();
   }
 
@@ -107,6 +125,8 @@ export struct ReportContent {
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
   /** 2in1 独立页面（IndexWideDuo 下半屏）渲染时由壳传入 true：本组件不内嵌结果区 */
   bottomResult: boolean = false;
+  /** 顶部状态栏/刘海避让高度（vp）：整页滚动时预留顶部安全区 */
+  @State topInset: number = 0;
 
   private t(key: string): string {
     void this.appLang;
@@ -129,12 +149,18 @@ export struct ReportContent {
     // 深度思考：清空上一次的思考过程并展开（生成中实时滚动展示）
     this.thinkText = '';
     this.thinkExpanded = true;
+    this.thinkRunning = true;
     // 开始新的生成：清除旧草稿，避免旧结果回魂
     PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
     const user: string = `学生姓名：${this.studentName}\n班级：${this.className}\n各科成绩：${this.grades}\n课堂观察记录：${this.observation}\n\n请生成给家长的个性化学情报告。${remarkPart}`;
     try {
       const content: string = await AiService.chat(Prompts.studentReportSystem(), user, (partial: string) => {
+        if (this.thinkRunning) {
+          // 第一个正文字块到达＝思考阶段完成、正文开始输出：此刻折叠思考框
+          this.thinkRunning = false;
+          this.thinkExpanded = false;
+        }
         this.result = partial;
         this.scrollLiveToBottom();
       }, false, {
@@ -161,9 +187,12 @@ export struct ReportContent {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
+      this.thinkRunning = false;
       // 生成结束（完成/失败/停止）：思考过程自动折叠，用户点击标题可展开查看
-      this.thinkExpanded = false;
-    }
+          this.thinkExpanded = false;
+          // 生成完成后自动下滑定位到结果预览，仅留预览顶部操作按钮
+          setTimeout(() => this.autoShowResult(), 120);
+        }
   }
 
   /** 自动保存到历史（开关开启且内容非空时静默保存；content 用于页面已离开时的兜底） */
@@ -198,6 +227,11 @@ export struct ReportContent {
   /** 生成中：预览框实时滚动到最底部（等一帧让新内容完成布局） */
   private scrollLiveToBottom(): void {
     setTimeout((): void => {
+      // 生成完成的这帧会把预览框 Scroller 从布局中移除（切换为整页滚动），
+      // 若此时仍对已销毁的 Scroller 调 scrollEdge，会在原生层崩溃导致闪退，故用 loading 守卫跳过
+      if (!this.loading) {
+        return;
+      }
       try {
         this.liveScroll.scrollEdge(Edge.Bottom);
       } catch (e) {
@@ -212,17 +246,17 @@ export struct ReportContent {
     AiService.stop(this.genKey());
     GenSession.clear(this.genKey());
     this.loading = false;
+    this.thinkRunning = false;
     // 停止生成后思考过程同样自动折叠
     this.thinkExpanded = false;
   }
 
-  build() {
-    Column({ space: 0 }) {
-      PageHeader({ title: this.t('page.report') })
-
+  /** 输入卡片 + 生成按钮区（生成中整卡置灰锁定按钮除外） */
+  @Builder
+  inputCard() {
+    Column({ space: 10 }) {
+      // 输入区：生成中整体置灰并锁定（按钮除外）
       Column({ space: 10 }) {
-        // 生成中：输入区整体置灰并锁定（按钮除外）
-        Column({ space: 10 }) {
         Row({ space: 10 }) {
           Text(this.t('label.student')).fontSize(15).fontColor(this.col('title')).width(86)
             .fontFamily(AppFonts.family())
@@ -283,120 +317,172 @@ export struct ReportContent {
 
         // 深度思考开关：开启后本次生成走思考模式（模型先推理再作答），思考过程实时展示
         ThinkSwitch()
-
-        }
-        .width('100%')
-        .enabled(!this.loading)
-        .opacity(this.loading ? 0.6 : 1)
-
-        if (this.loading) {
-          // 生成中：按钮变为"停止生成"（点击即停，保留半截预览）
-          Button(this.t('act.stop'))
-            .fontFamily(AppFonts.family())
-            .width('100%')
-            .height(44)
-            .backgroundColor('#C0564F')
-            .onClick(() => {
-              this.stopGen();
-            })
-        } else {
-          Button(this.t('act.report'))
-            .fontFamily(AppFonts.family())
-            .width('100%')
-            .height(44)
-            .backgroundColor('#4A90D9')
-            .onClick(() => {
-              this.generate();
-            })
-        }
       }
       .width('100%')
-      .padding(16)
-      .backgroundColor(this.col('card'))
-      .borderRadius(14)
+      .enabled(!this.loading)
+      .opacity(this.loading ? 0.6 : 1)
 
-      // 深度思考过程：灰色小字实时滚动；生成完成后自动折叠，点击标题可展开查看
-      if (this.thinkText !== '') {
-        ThinkPanel({
-          text: this.thinkText,
-          expanded: $thinkExpanded,
-          running: this.loading
-        })
+      if (this.loading) {
+        // 生成中：按钮变为"停止生成"（点击即停，保留半截预览）
+        Button(this.t('act.stop'))
+          .fontFamily(AppFonts.family())
           .width('100%')
-          .margin({ top: 10 })
-      }
-
-      if (this.bottomResult) {
-        // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
-      } else if (this.loading) {
-        if (this.result !== '') {
-          // 流式输出中：实时展示已生成内容并自动滚动到底部
-          Column() {
-            Row({ space: 6 }) {
-              LoadingProgress().width(14).height(14).color('#4A90D9')
-              Text(this.t('gen.streaming'))
-                .fontFamily(AppFonts.family())
-                .fontSize(12)
-                .fontColor(this.col('sub'))
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.Start)
-            .padding({ bottom: 8 })
-            Scroll(this.liveScroll) {
-              RichBox({ html: RichHtml.liveSafe(this.result) })
-                .width('100%')
-            }
-            .width('100%')
-            .layoutWeight(1)
-            .scrollBar(BarState.Off)
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .padding(16)
-          .alignItems(HorizontalAlign.Start)
-        } else {
-          Row({ space: 10 }) {
-            LoadingProgress().width(26).height(26).color('#4A90D9')
-            Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
-              .fontFamily(AppFonts.family())
-          }.width('100%').justifyContent(FlexAlign.Center).padding(20)
-        }
-      } else if (this.result !== '') {
-        ResultPanel({
-          result: this.result,
-          type: I18n.t('page.report'),
-          title: I18n.t('page.report') + '-' + this.studentName,
-          onSave: () => this.saveToHistory(),
-          onEdited: (t: string): void => {
-            if (t.trim() === '') {
-              // 异常空回写保护：避免已有结果被清空导致预览框消失
-              return;
-            }
-            this.result = t;
-            // 同步到生成会话：离开页面/再次进入时不丢最新内容（含编辑结果）
-            GenSession.end(this.genKey(), t);
-            PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), t);
-          }
-        })
-          .layoutWeight(1)
-          .padding(16)
+          .height(44)
+          .backgroundColor('#C0564F')
+          .onClick(() => {
+            this.stopGen();
+          })
       } else {
-        Row() {
-          Text(this.t('hint.safety'))
+        Button(this.t('act.report'))
+          .fontFamily(AppFonts.family())
+          .width('100%')
+          .height(44)
+          .backgroundColor('#4A90D9')
+          .onClick(() => {
+            this.generate();
+          })
+      }
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor(this.col('card'))
+    .borderRadius(14)
+  }
+
+  /** 生成中：仅预览框内部滚动（整页固定，自动滚到底） */
+  @Builder
+  loadingPreview() {
+    Column({ space: 8 }) {
+      if (this.result !== '') {
+        // 流式输出中：顶部小字提示 + 内容在预览框内部滚动到底
+        Row({ space: 6 }) {
+          LoadingProgress().width(14).height(14).color('#4A90D9')
+          Text(this.t('gen.streaming'))
             .fontFamily(AppFonts.family())
             .fontSize(12)
-            .fontColor(this.col('hint'))
-            .lineHeight(18)
+            .fontColor(this.col('sub'))
         }
         .width('100%')
-        .padding(16)
+        .justifyContent(FlexAlign.Start)
+        .padding({ bottom: 8 })
+        Scroll(this.liveScroll) {
+          RichBox({ html: RichHtml.liveSafe(this.result) })
+            .width('100%')
+        }
+        .width('100%')
         .layoutWeight(1)
-        .alignItems(VerticalAlign.Top)
+        .align(Alignment.TopStart)
+        .scrollBar(BarState.Off)
+      } else {
+        Row({ space: 10 }) {
+          LoadingProgress().width(26).height(26).color('#4A90D9')
+          Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+            .fontFamily(AppFonts.family())
+        }.width('100%').justifyContent(FlexAlign.Center).padding(20)
+      }
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .backgroundColor(this.col('card'))
+    .padding(16)
+    .borderRadius(14)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  build() {
+    Column({ space: 0 }) {
+      // 固定标题栏：整页滚动时标题栏保持不滚，并预留顶部安全区（状态栏/刘海避让）
+      Column() {
+        PageHeader({ title: this.t('page.report') })
+      }
+      .width('100%')
+      .padding({ top: this.topInset })
+
+      if (this.loading) {
+        // 生成中：输入卡片固定不下滑（整页不随生成滚动），仅预览框内部滚动到底
+        Column({ space: 0 }) {
+          this.inputCard()
+          // 深度思考过程：生成中实时滚动；完成后自动折叠
+          if (this.thinkText !== '') {
+            ThinkPanel({
+              text: this.thinkText,
+              expanded: $thinkExpanded,
+              running: this.thinkRunning
+            })
+              .width('100%')
+              .margin({ top: 10 })
+          }
+          this.loadingPreview()
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .padding(12)
+      } else {
+        // 生成完成后：整页可下滑，完整显示预览框与顶部操作按钮
+        Scroll(this.doneScroll) {
+          Column({ space: 0 }) {
+            this.inputCard()
+
+            // 深度思考过程：灰色小字；生成完成后自动折叠，点击标题可展开查看
+            if (this.thinkText !== '') {
+              ThinkPanel({
+                text: this.thinkText,
+                expanded: $thinkExpanded,
+                running: this.thinkRunning
+              })
+                .width('100%')
+                .margin({ top: 10 })
+            }
+
+            if (this.bottomResult) {
+              // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
+            } else if (this.result !== '') {
+              ResultPanel({
+                result: this.result,
+                type: I18n.t('page.report'),
+                title: I18n.t('page.report') + '-' + this.studentName,
+                scrollPage: true,
+                onSave: () => this.saveToHistory(),
+                onEdited: (t: string): void => {
+                  if (t.trim() === '') {
+                    // 异常空回写保护：避免已有结果被清空导致预览框消失
+                    return;
+                  }
+                  this.result = t;
+                  // 同步到生成会话：离开页面/再次进入时不丢最新内容（含编辑结果）
+                  GenSession.end(this.genKey(), t);
+                  PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), t);
+                }
+              })
+                    .width('100%')
+                    .padding(16)
+                    .onAreaChange((_o: Area, n: Area): void => {
+                      this.resultTop = Number(n.globalPosition.y);
+                    })
+            } else {
+              Row() {
+                Text(this.t('hint.safety'))
+                  .fontFamily(AppFonts.family())
+                  .fontSize(12)
+                  .fontColor(this.col('hint'))
+                  .lineHeight(18)
+              }
+              .width('100%')
+              .padding(16)
+              .alignItems(VerticalAlign.Top)
+            }
+          }
+          .width('100%')
+          .padding(12)
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+        .align(Alignment.TopStart)
       }
     }
     .width('100%')
     .height('100%')
-    .padding(12)
     .backgroundColor(this.col('bg'))
   }
 }
@@ -425,10 +511,4 @@ struct ReportEntry {
     .height('100%')
   }
 
-  pageTransition() {
-    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
-      .slide(SlideEffect.Right)
-    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
-      .slide(SlideEffect.Left)
   }
-}

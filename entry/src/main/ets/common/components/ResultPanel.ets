@@ -92,6 +92,12 @@ export struct ResultPanel {
   exportMode: string = 'word';
   /** 课件大纲预览：true 时把 JSON 渲染为逐页幻灯片框架（白底黑字） */
   slideMode: boolean = false;
+  /**
+   * 整页滚动模式：预览内容自然撑高（不内嵌独立滚动），由外层页面级 Scroll 统一滚动。
+   * 用于"生成完毕后整个功能页下滑、完整显示预览框与顶部操作按钮"的形态；
+   * 默认 false 时保持原有"面板内独立滚动"行为（2in1 下半屏等受限高度场景）。
+   */
+  scrollPage: boolean = false;
   @StorageProp('appLang') appLang: string = 'zh';
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
 
@@ -145,6 +151,21 @@ export struct ResultPanel {
   private col(key: string): string {
     void this.resolvedTheme;
     return AppTheme.color(key, this.resolvedTheme);
+  }
+
+  /** 是否深色主题 */
+  private isDark(): boolean {
+    return this.resolvedTheme === 'dark';
+  }
+
+  /** 当前墨色：深色用浅色白字，浅色保持黑字（预览/编辑器纸张深色时保证可读） */
+  private inkHex(): string {
+    return this.isDark() ? '#E7EAF0' : '#1B1B1F';
+  }
+
+  /** 纸张底色：深色模式用深色纸，浅色保持白纸（导出仍是白纸黑字，与本预览无关） */
+  private paperHex(): string {
+    return this.isDark() ? '#1C222C' : '#FFFFFF';
   }
 
   /**
@@ -276,7 +297,7 @@ export struct ResultPanel {
     this.editorReady = true;
     const runs: RichRun[] = RichHtml.htmlToRuns(this.result);
     try {
-      this.rc.setTypingStyle({ fontColor: '#1B1B1F', fontSize: 15 });
+      this.rc.setTypingStyle({ fontColor: this.inkHex(), fontSize: 15 });
       this.rc.setCaretOffset(0);
       for (let i: number = 0; i < runs.length; i++) {
         const run: RichRun = runs[i];
@@ -296,7 +317,7 @@ export struct ResultPanel {
           st.fontSize = run.size;
         }
         // 未指定颜色时显式使用"墨色"：避免 RichEditor 缺省样式（含 alpha 通道）被误读为彩色/红色
-        st.fontColor = run.color !== '' ? ('#' + run.color) : '#1B1B1F';
+        st.fontColor = run.color !== '' ? ('#' + run.color) : this.inkHex();
         this.rc.addTextSpan(run.text, { style: st });
       }
       this.rc.setSelection(0, 0);
@@ -470,7 +491,7 @@ export struct ResultPanel {
       return;
     }
     const st: RichEditorTextStyle = {};
-    st.fontColor = colorHex === '' ? '#1B1B1F' : colorHex;
+    st.fontColor = colorHex === '' ? this.inkHex() : colorHex;
     this.editedFlag = true;
     const hex: string = colorHex === '' ? '' : colorHex.replace('#', '').toLowerCase();
     const op: StyleOp = { kind: 'color', on: colorHex !== '', color: hex, start: this.selStart, end: this.selEnd };
@@ -595,7 +616,7 @@ export struct ResultPanel {
           type: strike ? TextDecorationType.LineThrough : (underline ? TextDecorationType.Underline : TextDecorationType.None),
           color: color
         })
-        .fontColor(this.hasSelection ? (color === '' ? '#1B1B1F' : color) : '#9AA0A6')
+        .fontColor(this.hasSelection ? (color === '' ? this.inkHex() : color) : '#9AA0A6')
     }
     .width(40)
     .height(40)
@@ -717,7 +738,7 @@ export struct ResultPanel {
       .width('100%')
       .layoutWeight(1)
       .padding(10)
-      .backgroundColor('#FFFFFF')
+      .backgroundColor(this.paperHex())
       .borderRadius(10)
 
       // 底部操作
@@ -831,8 +852,12 @@ export struct ResultPanel {
     .backgroundColor('rgba(0,0,0,0.38)')
   }
 
-  /** 课件大纲：按需渲染幻灯片框架；JSON 无法解析时回退富文本显示原文 */
+  /** 课件：按需渲染幻灯片框架（优先解析 HTML 课件，回退旧 JSON 大纲）；都无法解析时回退富文本显示原文 */
   private slidesNow(): CourseSlide[] {
+    const html: CourseSlide[] | null = PptxExporter.parseHtmlCourseware(this.result);
+    if (html !== null && html.length > 0) {
+      return html;
+    }
     const s: CourseSlide[] | null = PptxExporter.parseSlides(this.result);
     if (s !== null && s.length > 0) {
       return s;
@@ -852,21 +877,21 @@ export struct ResultPanel {
     }
   }
 
-  /** 课件大纲：逐页幻灯片框架预览（白底黑字，可下滑） */
+  /** 课件：逐页 16:9 幻灯片卡片预览（白底、一张一页、可下滑） */
   @Builder
   slidesPreview(slides: CourseSlide[]) {
     Column({ space: 12 }) {
       ForEach(slides, (s: CourseSlide, index: number) => {
-        Column({ space: 6 }) {
-          Row() {
+        Column({ space: 5 }) {
+          Row({ space: 8 }) {
             if (s.type !== '') {
               Text(s.type)
                 .fontFamily(AppFonts.family())
-                .fontSize(12)
+                .fontSize(10)
                 .fontColor('#2B4C7E')
                 .backgroundColor('#E8F1FB')
                 .borderRadius(6)
-                .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+                .padding({ left: 7, right: 7, top: 2, bottom: 2 })
             }
             Blank()
             Text((index + 1) + ' / ' + slides.length)
@@ -875,25 +900,32 @@ export struct ResultPanel {
               .fontColor('#9AA0A6')
           }
           .width('100%')
+
           Text(s.title !== '' ? s.title : this.t('cw.page').replace('{n}', (index + 1).toString()))
             .fontFamily(AppFonts.family())
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
-            .fontColor('#1B1B1F')
+            .fontColor(this.inkHex())
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
-          Divider().color('#EDF0F4')
+            .padding({ top: 2, bottom: 2 })
+          Divider().color(this.isDark() ? '#333C4A' : '#EDF0F4')
+
           if (s.points.length > 0) {
-            ForEach(s.points, (pt: string) => {
+            ForEach(s.points.slice(0, 5), (pt: string, pi: number) => {
               Row() {
                 Text('•  ')
                   .fontFamily(AppFonts.family())
-                  .fontSize(14)
-                  .fontColor('#333333')
+                  .fontSize(13)
+                  .fontColor(this.inkHex())
                 Text(pt)
                   .fontFamily(AppFonts.family())
-                  .fontSize(14)
-                  .fontColor('#333333')
-                  .lineHeight(21)
+                  .fontSize(13)
+                  .fontColor(this.inkHex())
+                  .lineHeight(18)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
                   .layoutWeight(1)
               }
               .width('100%')
@@ -904,21 +936,28 @@ export struct ResultPanel {
               .fontFamily(AppFonts.family())
               .fontSize(12)
               .fontColor('#9AA0A6')
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
           }
           if (s.visual !== '') {
             Text(this.t('cw.visual') + s.visual)
               .fontFamily(AppFonts.family())
               .fontSize(12)
-              .fontColor('#595959')
+              .fontColor(this.inkHex())
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
               .padding({ top: 2 })
           }
         }
         .width('100%')
-        .padding(14)
-        .backgroundColor('#FFFFFF')
+        // 16:9 幻灯片画布：内容按 16:9 完整呈现，超出部分裁切（提示词已约束内容不溢出）
+        .aspectRatio(16 / 9)
+        .padding(12)
+        .backgroundColor(this.paperHex())
         .borderRadius(12)
+        .clip(true)
         .alignItems(HorizontalAlign.Start)
       }, (s: CourseSlide, index: number) => s.page.toString())
     }
@@ -967,27 +1006,49 @@ export struct ResultPanel {
       .width('100%')
       .padding({ left: 4, right: 4 })
 
-      Scroll() {
-        if (this.result === '') {
-          Text(this.t('cw.empty'))
-            .fontFamily(AppFonts.family())
-            .fontSize(15)
-            .fontColor(this.col('hint'))
-            .width('100%')
-        } else if (this.slideMode) {
-          this.slideContent()
-        } else {
-          RichBox({ html: this.result })
-            .width('100%')
+      if (this.scrollPage) {
+        // 整页滚动模式：正文自然撑高，与顶部操作按钮一起随外层页面级别 Scroll 滚动，
+        // 保证"下滑后完整显示预览框和顶部操作按钮"
+        Column() {
+          if (this.result === '') {
+            Text(this.t('cw.empty'))
+              .fontFamily(AppFonts.family())
+              .fontSize(15)
+              .fontColor(this.col('hint'))
+              .width('100%')
+          } else if (this.slideMode) {
+            this.slideContent()
+          } else {
+            RichBox({ html: this.result })
+              .width('100%')
+          }
         }
+        .width('100%')
+      } else {
+        Scroll() {
+          if (this.result === '') {
+            Text(this.t('cw.empty'))
+              .fontFamily(AppFonts.family())
+              .fontSize(15)
+              .fontColor(this.col('hint'))
+              .width('100%')
+          } else if (this.slideMode) {
+            this.slideContent()
+          } else {
+            RichBox({ html: this.result })
+              .width('100%')
+          }
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Auto)
+        .align(Alignment.TopStart)
       }
-      .width('100%')
-      .layoutWeight(1)
-      .scrollBar(BarState.Auto)
-      .align(Alignment.TopStart)
     }
     .width('100%')
-    .height('100%')
+    // 整页滚动模式下高度取自然撑高（正文完整展开，随页面级 Scroll 可下滑）；
+    // 受限高度模式保持 100% 依赖内部 Scroll
+    .height(this.scrollPage ? 'auto' : '100%')
   }
 
   build() {
@@ -1002,7 +1063,8 @@ export struct ResultPanel {
       }
     }
     .width('100%')
-    .height('100%')
+    // 整页滚动模式下由外层页面级 Scroll 撑高；受限高度场景保持 100% 让正文独立滚动
+    .height(this.scrollPage ? 'auto' : '100%')
     // 全屏编辑：点击"编辑"后以整窗内容覆盖呈现，编辑区占满整屏
     .bindContentCover(this.editing, this.editorView(), {
       backgroundColor: this.col('bg'),

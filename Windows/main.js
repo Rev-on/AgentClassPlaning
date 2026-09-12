@@ -2,8 +2,32 @@
  * Rev TechingMaster 电脑版（Electron 主进程）
  * 布局：左侧工具栏 + 右侧工具页面（在 renderer/index.html 中实现）
  */
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
+
+// renderer 侧保存文档（Word/PPT 导出）与读取 ppt 骨架模板
+ipcMain.handle('rtm:saveFile', async (event, name, data) => {
+  const ext = path.extname(String(name || ''));
+  const filters = ext === '.pptx'
+    ? [{ name: 'PowerPoint', extensions: ['pptx'] }]
+    : ext === '.docx'
+      ? [{ name: 'Word', extensions: ['docx'] }]
+      : [{ name: 'All Files', extensions: ['*'] }];
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: '导出文档',
+    defaultPath: name,
+    filters
+  });
+  if (canceled || !filePath) return { canceled: true, path: '' };
+  fs.writeFileSync(filePath, Buffer.from(data));
+  return { canceled: false, path: filePath };
+});
+ipcMain.handle('rtm:skeleton', () => {
+  const p = path.join(__dirname, 'renderer', 'pptskel.pptx');
+  const buf = fs.readFileSync(p);
+  return new Uint8Array(buf);
+});
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -17,7 +41,8 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      preload: path.join(__dirname, 'renderer', 'preload.js')
     }
   });
   win.setMenuBarVisibility(false);

@@ -608,10 +608,4 @@ struct HistoryEntry {
     .height('100%')
   }
 
-  pageTransition() {
-    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
-      .slide(SlideEffect.Right)
-    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
-      .slide(SlideEffect.Left)
   }
-}

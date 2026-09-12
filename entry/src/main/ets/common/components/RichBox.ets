@@ -17,15 +17,34 @@ interface PreviewBlock {
 
 @Component
 export struct RichBox {
+  /** 实际生效主题：'light' | 'dark'（由 EntryAbility 维护） */
+  @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
   /** 富文本内容（HTML 子集；旧纯文本内容会被自动兼容） */
   @Prop html: string = '';
-  /** 纸张底色（默认白） */
+  /** 纸张底色（默认白；深色模式下自动切为深色纸） */
   @Prop paper: string = '#FFFFFF';
   /** 正文基准字号（fp，与软件正文一致；随字号设置缩放） */
   @Prop bodySize: number = 15;
 
-  /** 正文颜色（墨色，白底下可读） */
+  /** 墨色：浅色＝黑，深色＝白，保证纸面可读 */
   private static readonly INK: string = '#1B1B1F';
+  private static readonly INK_DARK: string = '#E7EAF0';
+  private static readonly PAPER_DARK: string = '#1C222C';
+
+  /** 主题是否为深色 */
+  private isDark(): boolean {
+    return this.resolvedTheme === 'dark';
+  }
+
+  /** 当前墨色：深色模式用浅色白字，浅色保持黑字 */
+  private ink(): string {
+    return this.isDark() ? RichBox.INK_DARK : RichBox.INK;
+  }
+
+  /** 纸面底色：深色模式切为深色纸（调用了可覆盖的 paper，浅色仍可指定纸张） */
+  private paperColor(): string {
+    return this.isDark() ? RichBox.PAPER_DARK : this.paper;
+  }
 
   /** 解析为"标题/段落"块序列（按换行切段） */
   private blocks(): PreviewBlock[] {
@@ -91,7 +110,7 @@ export struct RichBox {
               .fontFamily(AppFonts.family())
               .fontSize(this.headingSize(b.heading))
               .fontWeight(FontWeight.Bold)
-              .fontColor(RichBox.INK)
+              .fontColor(this.ink())
               .width('100%')
               .lineHeight(this.headingSize(b.heading) + 8)
           } else {
@@ -100,7 +119,7 @@ export struct RichBox {
                 Span(r.text)
                   .fontFamily(AppFonts.family())
                   .fontSize(r.size >= 19 ? this.bodySize + 6 : (r.size >= 17 ? this.bodySize + 2 : this.bodySize))
-                  .fontColor(r.color !== '' ? ('#' + r.color) : RichBox.INK)
+                  .fontColor(r.color !== '' ? ('#' + r.color) : this.ink())
                   .fontWeight(r.bold ? FontWeight.Bold : FontWeight.Normal)
                   .fontStyle(r.italic ? FontStyle.Italic : FontStyle.Normal)
                   .decoration({
@@ -117,7 +136,7 @@ export struct RichBox {
     }
     .width('100%')
     .padding(12)
-    .backgroundColor(this.paper)
+    .backgroundColor(this.paperColor())
     .borderRadius(10)
     .alignItems(HorizontalAlign.Start)
   }

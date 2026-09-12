@@ -21,6 +21,7 @@ import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 import { RichBox } from '../common/components/RichBox';
 import { RichHtml } from '../common/RichHtml';
+import { SafeInsets } from '../common/SafeInsets';
 
 /** 从教案页跳转携带的路由参数 */
 interface PlanImportParams {
@@ -41,6 +42,7 @@ export struct CoursewareContent {
   @State thinkText: string = '';
   /** 思考过程是否展开（生成中展开实时滚动，生成完成后自动折叠，点击标题可再次展开） */
   @State thinkExpanded: boolean = true;
+  @State thinkRunning: boolean = false;
   @State result: string = '';
   /** 从教案页导入：非空表示处于"教案导入"模式（隐藏输入框，直接基于教案生成） */
   @State importedPlan: string = '';
@@ -49,10 +51,26 @@ export struct CoursewareContent {
   private sessSub: number = -1;
   /** 实时预览滚动控制器（生成中自动滚到最底部） */
   private liveScroll: Scroller = new Scroller();
+  /** 完成后整页滚动控制器（自动下滑到结果预览） */
+  private doneScroll: Scroller = new Scroller();
+  /** 结果预览在整页滚动内容中的顶部偏移（用于完成后自动定位） */
+  private resultTop: number = 0;
   /** 用户是否点击了"停止生成" */
   private stopRequested: boolean = false;
 
+  /** 生成完成后自动下滑到结果预览顶部（输入卡片滑出视口，预览填充可见区域并保持可下滑查看剩余内容） */
+  private autoShowResult(): void {
+    if (this.result === '') {
+      return;
+    }
+    this.doneScroll.scrollTo({ xOffset: 0, yOffset: Math.max(0, this.resultTop), animation: { duration: 350 } });
+  }
+
   aboutToAppear(): void {
+    // 读取顶部状态栏/刘海避让高度：整页滚动时预留顶部安全区
+    SafeInsets.topInset(getContext(this) as common.UIAbilityContext).then((v: number): void => {
+      this.topInset = v;
+    });
     // 教案页跳转导入：读取路由参数进入"教案导入"模式（普通入口无参数时为空对象，必须判空）
     const rawParams = router.getParams();
     if (rawParams !== undefined && rawParams !== null) {
@@ -126,6 +144,8 @@ export struct CoursewareContent {
   @StorageProp('appResolvedTheme') resolvedTheme: string = 'light';
   /** 2in1 独立页面（IndexWideDuo 下半屏）渲染时由壳传入 true：本组件不内嵌结果区 */
   bottomResult: boolean = false;
+  /** 顶部状态栏/刘海避让高度（vp）：整页滚动时预留顶部安全区 */
+  @State topInset: number = 0;
 
   private t(key: string): string {
     void this.appLang;
@@ -135,34 +155,6 @@ export struct CoursewareContent {
   private col(key: string): string {
     void this.resolvedTheme;
     return AppTheme.color(key, this.resolvedTheme);
-  }
-
-  /** 从原始输出中提取合法 JSON 并格式化为缩进文本；失败返回 null */
-  private normalizeJson(raw: string): string | null {
-    let text: string = raw.trim();
-    const fenceStart: number = text.indexOf('```');
-    if (fenceStart >= 0) {
-      const fenceEnd: number = text.lastIndexOf('```');
-      if (fenceEnd > fenceStart) {
-        text = text.substring(fenceStart + 3, fenceEnd).trim();
-      }
-    }
-    const s: number = text.indexOf('[');
-    const e: number = text.lastIndexOf(']');
-    if (s < 0 || e <= s) {
-      return null;
-    }
-    text = text.substring(s, e + 1);
-    let obj: object | null = null;
-    try {
-      obj = JSON.parse(text) as object;
-    } catch (err) {
-      return null;
-    }
-    if (obj === null || !Array.isArray(obj)) {
-      return null;
-    }
-    return JSON.stringify(obj, null, 2);
   }
 
   async generate(): Promise<void> {
@@ -177,19 +169,25 @@ export struct CoursewareContent {
     // 深度思考：清空上一次的思考过程并展开（生成中实时滚动展示）
     this.thinkText = '';
     this.thinkExpanded = true;
+    this.thinkRunning = true;
     // 开始新的生成：清除旧草稿，避免旧结果回魂
     PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
     let user: string = '';
     if (importText !== '') {
-      // 教案导入模式：直接基于已生成的教案内容生成配套课件大纲
+      // 教案导入模式：直接基于已生成的教案内容生成配套 HTML 课件
       user = '以下是一份已经生成并通过审阅的完整教案：\n' + importText +
-        '\n\n请基于该教案的课题、结构重难点与教学环节，生成配套的逐页课件大纲（严格 JSON 格式，字段与页面顺序同常规课件大纲要求）。';
+        '\n\n请基于该教案的课题、结构重难点与教学环节，生成配套的整份 HTML 课件（统一 CSS 样式 + 逐页 <section class="slide"> 课件，结构同课件生成要求）。';
     } else {
       const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
-      user = `学科：${this.subject}\n年级：${this.grade}\n课题：${this.topic}\n课型/用途：${this.usage}\n\n请生成该课题的逐页课件大纲（JSON 格式）。${remarkPart}`;
+      user = `学科：${this.subject}\n年级：${this.grade}\n课题：${this.topic}\n课型/用途：${this.usage}\n\n请生成该课题的整份 HTML 课件（统一 CSS 样式 + 逐页 <section class="slide"> 课件，并满足 16:9 下完整显示不溢出的要求）。${remarkPart}`;
     }
     try {
       const content: string = await AiService.chat(Prompts.coursewareSystem(), user, (partial: string) => {
+        if (this.thinkRunning) {
+          // 第一个正文字块到达＝思考阶段完成、正文开始输出：此刻折叠思考框
+          this.thinkRunning = false;
+          this.thinkExpanded = false;
+        }
         this.result = partial;
         this.scrollLiveToBottom();
       }, true, {
@@ -208,24 +206,21 @@ export struct CoursewareContent {
         this.stopRequested = false;
         return;
       }
-      const pretty: string | null = this.normalizeJson(content);
-      const finalText: string = pretty !== null ? pretty : content;
-      if (pretty !== null) {
-        this.result = pretty;
-      } else {
-        this.result = content;
-        promptAction.showToast({ message: this.t('err.jsonInvalid') });
-      }
-      this.autoSaveHistory(finalText);
+      // 输出本身即 HTML 课件（统一 CSS + 逐页 <section>），整体保留，不做 JSON 规范化
+      this.result = content;
+      this.autoSaveHistory(content);
       // 结果即时落盘草稿：任何异常退出/进程被杀都能恢复
-      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), finalText);
+      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), content);
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
     } finally {
       this.loading = false;
+      this.thinkRunning = false;
       // 生成结束（完成/失败/停止）：思考过程自动折叠，用户点击标题可展开查看
-      this.thinkExpanded = false;
-    }
+          this.thinkExpanded = false;
+          // 生成完成后自动下滑定位到结果预览，仅留预览顶部操作按钮
+          setTimeout(() => this.autoShowResult(), 120);
+        }
   }
 
   /** 自动保存到历史（开关开启且内容非空时静默保存；content 用于页面已离开时的兜底） */
@@ -260,6 +255,11 @@ export struct CoursewareContent {
   /** 生成中：预览框实时滚动到最底部（等一帧让新内容完成布局） */
   private scrollLiveToBottom(): void {
     setTimeout((): void => {
+      // 生成完成的这帧会把预览框 Scroller 从布局中移除（切换为整页滚动），
+      // 若此时仍对已销毁的 Scroller 调 scrollEdge，会在原生层崩溃导致闪退，故用 loading 守卫跳过
+      if (!this.loading) {
+        return;
+      }
       try {
         this.liveScroll.scrollEdge(Edge.Bottom);
       } catch (e) {
@@ -274,66 +274,65 @@ export struct CoursewareContent {
     AiService.stop(this.genKey());
     GenSession.clear(this.genKey());
     this.loading = false;
+    this.thinkRunning = false;
     // 停止生成后思考过程同样自动折叠
     this.thinkExpanded = false;
   }
 
-  build() {
-    Column({ space: 0 }) {
-      PageHeader({ title: this.t('page.courseware') })
-
+  /** 输入卡片 + 生成按钮区（教案导入模式下隐藏输入框；生成中整卡置灰） */
+  @Builder
+  inputCard() {
+    Column({ space: 10 }) {
+      // 输入区：教案导入模式隐藏全部原有输入框；生成中整体置灰锁定
       Column({ space: 10 }) {
-        // 生成中：输入区整体置灰并锁定（按钮除外）
-        Column({ space: 10 }) {
-        // 教案导入模式：隐藏全部原有输入框（学科/年级/课题/课型/备注），只保留生成按钮与提示
         if (!this.importMode) {
-        Row({ space: 10 }) {
-          Text(this.t('label.subject')).fontSize(15).fontColor(this.col('title')).width(86)
-            .fontFamily(AppFonts.family())
-          TextInput({ text: this.subject, placeholder: this.t('ph.subject') })
-            .fontFamily(AppFonts.family())
-            .layoutWeight(1)
-            .height(42)
-            .onChange((v: string) => { this.subject = v; })
-        }
-        .width('100%')
-        Row({ space: 10 }) {
-          Text(this.t('label.grade')).fontSize(15).fontColor(this.col('title')).width(86)
-            .fontFamily(AppFonts.family())
-          TextInput({ text: this.grade, placeholder: this.t('ph.grade') })
-            .fontFamily(AppFonts.family())
-            .layoutWeight(1)
-            .height(42)
-            .onChange((v: string) => { this.grade = v; })
-        }
-        .width('100%')
-        Row({ space: 10 }) {
-          Text(this.t('label.topic')).fontSize(15).fontColor(this.col('title')).width(86)
-            .fontFamily(AppFonts.family())
-          TextInput({ text: this.topic, placeholder: this.t('ph.topic') })
-            .fontFamily(AppFonts.family())
-            .layoutWeight(1)
-            .height(42)
-            .onChange((v: string) => { this.topic = v; })
-        }
-        .width('100%')
-        Row({ space: 10 }) {
-          Text(this.t('label.usage')).fontSize(15).fontColor(this.col('title')).width(86)
-            .fontFamily(AppFonts.family())
-          TextInput({ text: this.usage, placeholder: this.t('ph.usage') })
-            .fontFamily(AppFonts.family())
-            .layoutWeight(1)
-            .height(42)
+          Row({ space: 10 }) {
+            Text(this.t('label.subject')).fontSize(15).fontColor(this.col('title')).width(86)
+              .fontFamily(AppFonts.family())
+            TextInput({ text: this.subject, placeholder: this.t('ph.subject') })
+              .fontFamily(AppFonts.family())
+              .layoutWeight(1)
+              .height(42)
+              .onChange((v: string) => { this.subject = v; })
+          }
+          .width('100%')
+          Row({ space: 10 }) {
+            Text(this.t('label.grade')).fontSize(15).fontColor(this.col('title')).width(86)
+              .fontFamily(AppFonts.family())
+            TextInput({ text: this.grade, placeholder: this.t('ph.grade') })
+              .fontFamily(AppFonts.family())
+              .layoutWeight(1)
+              .height(42)
+              .onChange((v: string) => { this.grade = v; })
+          }
+          .width('100%')
+          Row({ space: 10 }) {
+            Text(this.t('label.topic')).fontSize(15).fontColor(this.col('title')).width(86)
+              .fontFamily(AppFonts.family())
+            TextInput({ text: this.topic, placeholder: this.t('ph.topic') })
+              .fontFamily(AppFonts.family())
+              .layoutWeight(1)
+              .height(42)
+              .onChange((v: string) => { this.topic = v; })
+          }
+          .width('100%')
+          Row({ space: 10 }) {
+            Text(this.t('label.usage')).fontSize(15).fontColor(this.col('title')).width(86)
+              .fontFamily(AppFonts.family())
+            TextInput({ text: this.usage, placeholder: this.t('ph.usage') })
+              .fontFamily(AppFonts.family())
+              .layoutWeight(1)
+              .height(42)
             .onChange((v: string) => { this.usage = v; })
-        }
-        .width('100%')
-        // 备注（支持语音输入：点击麦克风切换"按住说话"，松手发送，上滑取消）
-        VoiceRemarkBox({
-          text: $remark,
-          disabled: this.loading,
-          labelText: this.t('label.remark'),
-          placeholderText: this.t('ph.remark')
-        })
+          }
+          .width('100%')
+          // 备注（支持语音输入：点击麦克风切换"按住说话"，松手发送，上滑取消）
+          VoiceRemarkBox({
+            text: $remark,
+            disabled: this.loading,
+            labelText: this.t('label.remark'),
+            placeholderText: this.t('ph.remark')
+          })
         }
 
         // 附件：+ 号选择图片/文档/拍照（上限 10）
@@ -341,138 +340,190 @@ export struct CoursewareContent {
 
         // 深度思考开关：开启后本次生成走思考模式（模型先推理再作答），思考过程实时展示
         ThinkSwitch()
-
-        }
-        .width('100%')
-        .enabled(!this.loading)
-        .opacity(this.loading ? 0.6 : 1)
-
-        if (this.loading) {
-          // 生成中：按钮变为"停止生成"（点击即停，保留半截预览）
-          Button(this.t('act.stop'))
-            .fontFamily(AppFonts.family())
-            .width('100%')
-            .height(44)
-            .backgroundColor('#C0564F')
-            .onClick(() => {
-              this.stopGen();
-            })
-        } else {
-          Button(this.t('act.courseware'))
-            .fontFamily(AppFonts.family())
-            .width('100%')
-            .height(44)
-            .backgroundColor('#F0A93F')
-            .onClick(() => {
-              this.generate();
-            })
-        }
-        if (this.importMode) {
-          // 教案导入模式：生成按钮下方绿字提示
-          Text(this.t('import.planImported'))
-            .fontFamily(AppFonts.family())
-            .fontSize(13)
-            .fontWeight(FontWeight.Medium)
-            .fontColor('#2E9E63')
-            .width('100%')
-            .padding({ top: 2 })
-        }
-        Text(this.t('hint.coursewareJson'))
-          .fontFamily(AppFonts.family())
-          .fontSize(11)
-          .fontColor(this.col('hint'))
-          .width('100%')
-          .lineHeight(16)
       }
       .width('100%')
-      .padding(16)
-      .backgroundColor(this.col('card'))
-      .borderRadius(14)
+      .enabled(!this.loading)
+      .opacity(this.loading ? 0.6 : 1)
 
-      // 深度思考过程：灰色小字实时滚动；生成完成后自动折叠，点击标题可展开查看
-      if (this.thinkText !== '') {
-        ThinkPanel({
-          text: this.thinkText,
-          expanded: $thinkExpanded,
-          running: this.loading
-        })
+      if (this.loading) {
+        // 生成中：按钮变为"停止生成"（点击即停，保留半截预览）
+        Button(this.t('act.stop'))
+          .fontFamily(AppFonts.family())
           .width('100%')
-          .margin({ top: 10 })
-      }
-
-      if (this.bottomResult) {
-        // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
-      } else if (this.loading) {
-        if (this.result !== '') {
-          // 流式输出中：实时展示已生成内容并自动滚动到底部
-          Column() {
-            Row({ space: 6 }) {
-              LoadingProgress().width(14).height(14).color('#F0A93F')
-              Text(this.t('gen.streaming'))
-                .fontFamily(AppFonts.family())
-                .fontSize(12)
-                .fontColor(this.col('sub'))
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.Start)
-            .padding({ bottom: 8 })
-            Scroll(this.liveScroll) {
-              RichBox({ html: RichHtml.liveSafe(this.result) })
-                .width('100%')
-            }
-            .width('100%')
-            .layoutWeight(1)
-            .scrollBar(BarState.Off)
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .padding(16)
-          .alignItems(HorizontalAlign.Start)
-        } else {
-          Row({ space: 10 }) {
-            LoadingProgress().width(26).height(26).color('#F0A93F')
-            Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
-              .fontFamily(AppFonts.family())
-          }.width('100%').justifyContent(FlexAlign.Center).padding(20)
-        }
-      } else if (this.result !== '') {
-        ResultPanel({
-          result: this.result,
-          type: I18n.t('page.courseware'),
-          title: I18n.t('page.courseware') + '-' + this.topic,
-          exportMode: 'pptx',
-          slideMode: true,
-          onSave: () => this.saveToHistory(),
-          onEdited: (t: string): void => {
-            if (t.trim() === '') {
-              // 异常空回写保护：避免已有结果被清空导致预览框消失
-              return;
-            }
-            this.result = t;
-            // 同步到生成会话：离开页面/再次进入时不丢最新内容（含编辑结果）
-            GenSession.end(this.genKey(), t);
-            PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), t);
-          }
-        })
-          .layoutWeight(1)
-          .padding(16)
+          .height(44)
+          .backgroundColor('#C0564F')
+          .onClick(() => {
+            this.stopGen();
+          })
       } else {
-        Row() {
-          Text(this.t('hint.common'))
+        Button(this.t('act.courseware'))
+          .fontFamily(AppFonts.family())
+          .width('100%')
+          .height(44)
+          .backgroundColor('#F0A93F')
+          .onClick(() => {
+            this.generate();
+          })
+      }
+      if (this.importMode) {
+        // 教案导入模式：生成按钮下方绿字提示
+        Text(this.t('import.planImported'))
+          .fontFamily(AppFonts.family())
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#2E9E63')
+          .width('100%')
+          .padding({ top: 2 })
+      }
+      Text(this.t('hint.coursewareJson'))
+        .fontFamily(AppFonts.family())
+        .fontSize(11)
+        .fontColor(this.col('hint'))
+        .width('100%')
+        .lineHeight(16)
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor(this.col('card'))
+    .borderRadius(14)
+  }
+
+  /** 生成中：仅预览框内部滚动（整页固定，自动滚到底） */
+  @Builder
+  loadingPreview() {
+    Column({ space: 8 }) {
+      if (this.result !== '') {
+        // 流式输出中：顶部小字提示 + 内容在预览框内部滚动到底
+        Row({ space: 6 }) {
+          LoadingProgress().width(14).height(14).color('#F0A93F')
+          Text(this.t('gen.streaming'))
             .fontFamily(AppFonts.family())
             .fontSize(12)
-            .fontColor(this.col('hint'))
-            .lineHeight(18)
+            .fontColor(this.col('sub'))
         }
         .width('100%')
-        .padding(16)
+        .justifyContent(FlexAlign.Start)
+        .padding({ bottom: 8 })
+        Scroll(this.liveScroll) {
+          RichBox({ html: RichHtml.liveSafe(this.result) })
+            .width('100%')
+        }
+        .width('100%')
         .layoutWeight(1)
-        .alignItems(VerticalAlign.Top)
+        .align(Alignment.TopStart)
+        .scrollBar(BarState.Off)
+      } else {
+        Row({ space: 10 }) {
+          LoadingProgress().width(26).height(26).color('#F0A93F')
+          Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+            .fontFamily(AppFonts.family())
+        }.width('100%').justifyContent(FlexAlign.Center).padding(20)
+      }
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .backgroundColor(this.col('card'))
+    .padding(16)
+    .borderRadius(14)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  build() {
+    Column({ space: 0 }) {
+      // 固定标题栏：整页滚动时标题栏保持不滚，并预留顶部安全区（状态栏/刘海避让）
+      Column() {
+        PageHeader({ title: this.t('page.courseware') })
+      }
+      .width('100%')
+      .padding({ top: this.topInset })
+
+      if (this.loading) {
+        // 生成中：输入卡片固定不下滑（整页不随生成滚动），仅预览框内部滚动到底
+        Column({ space: 0 }) {
+          this.inputCard()
+          // 深度思考过程：生成中实时滚动；完成后自动折叠
+          if (this.thinkText !== '') {
+            ThinkPanel({
+              text: this.thinkText,
+              expanded: $thinkExpanded,
+              running: this.thinkRunning
+            })
+              .width('100%')
+              .margin({ top: 10 })
+          }
+          this.loadingPreview()
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .padding(12)
+      } else {
+        // 生成完成后：整页可下滑，完整显示预览框与顶部操作按钮
+        Scroll(this.doneScroll) {
+          Column({ space: 0 }) {
+            this.inputCard()
+
+            // 深度思考过程：灰色小字；生成完成后自动折叠，点击标题可展开查看
+            if (this.thinkText !== '') {
+              ThinkPanel({
+                text: this.thinkText,
+                expanded: $thinkExpanded,
+                running: this.thinkRunning
+              })
+                .width('100%')
+                .margin({ top: 10 })
+            }
+
+            if (this.bottomResult) {
+              // 2in1（独立页面）：生成结果统一显示在下半屏大面板，本组件不再内嵌结果区
+            } else if (this.result !== '') {
+              ResultPanel({
+                result: this.result,
+                type: I18n.t('page.courseware'),
+                title: I18n.t('page.courseware') + '-' + this.topic,
+                exportMode: 'pptx',
+                slideMode: true,
+                scrollPage: true,
+                onSave: () => this.saveToHistory(),
+                onEdited: (t: string): void => {
+                  if (t.trim() === '') {
+                    // 异常空回写保护：避免已有结果被清空导致预览框消失
+                    return;
+                  }
+                  this.result = t;
+                  // 同步到生成会话：离开页面/再次进入时不丢最新内容（含编辑结果）
+                  GenSession.end(this.genKey(), t);
+                  PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), t);
+                }
+              })
+                    .width('100%')
+                    .padding(16)
+                    .onAreaChange((_o: Area, n: Area): void => {
+                      this.resultTop = Number(n.globalPosition.y);
+                    })
+            } else {
+              Row() {
+                Text(this.t('hint.courseware'))
+                  .fontFamily(AppFonts.family())
+                  .fontSize(12)
+                  .fontColor(this.col('hint'))
+                  .lineHeight(18)
+              }
+              .width('100%')
+              .padding(16)
+              .alignItems(VerticalAlign.Top)
+            }
+          }
+          .width('100%')
+          .padding(12)
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+        .align(Alignment.TopStart)
       }
     }
     .width('100%')
     .height('100%')
-    .padding(12)
     .backgroundColor(this.col('bg'))
   }
 }
@@ -501,10 +552,4 @@ struct CoursewareEntry {
     .height('100%')
   }
 
-  pageTransition() {
-    PageTransitionEnter({ duration: 300, curve: Curve.EaseInOut })
-      .slide(SlideEffect.Right)
-    PageTransitionExit({ duration: 260, curve: Curve.EaseInOut })
-      .slide(SlideEffect.Left)
   }
-}
