@@ -140,6 +140,131 @@ export class PptxExporter {
   }
 
   /**
+   * 从 AI 直出的逐页 OOXML 片段中解析幻灯片。
+   * 约定输出格式：页面用一行 ===== 分隔；每页内为若干 field=value 行，
+   * 可含 type=、title=、notes=、body=（多条要点用 ｜ 分隔），body 同时接受连续多行"• …"。
+   * 未解析到任何页时返回 null。
+   */
+  static parseOoxmlFragments(text: string): CourseSlide[] | null {
+    const slides: CourseSlide[] = [];
+    const pages: string[] = text.split('=====');
+    for (let i: number = 0; i < pages.length; i++) {
+      const page: string = pages[i].trim();
+      if (page === '') {
+        continue;
+      }
+      let type: string = '';
+      let title: string = '';
+      let notes: string = '';
+      const pts: string[] = [];
+      const lines: string[] = page.split('\n');
+      let bodySeen: boolean = false;
+      for (let k: number = 0; k < lines.length; k++) {
+        const line: string = lines[k].trim();
+        if (line === '') {
+          continue;
+        }
+        const eq: number = line.indexOf('=');
+        if (eq > 0) {
+          const key: string = line.substring(0, eq).trim().toLowerCase();
+          const val: string = line.substring(eq + 1).trim();
+          if (key === 'type') {
+            type = val;
+          } else if (key === 'title') {
+            title = val;
+          } else if (key === 'notes') {
+            notes = val;
+          } else if (key === 'body') {
+            bodySeen = true;
+            const bullets: string[] = val.split('｜');
+            for (let b: number = 0; b < bullets.length; b++) {
+              const t: string = bullets[b].trim();
+              if (t !== '') {
+                pts.push(t);
+              }
+            }
+          }
+        } else {
+          // 裸行：若前面已出现 body 字段，视为补充要点（支持 • 前缀）
+          if (bodySeen || pts.length > 0) {
+            let t: string = line;
+            if (t.startsWith('•') || t.startsWith('-') || t.startsWith('*')) {
+              t = t.substring(1).trim();
+            }
+            if (t !== '') {
+              pts.push(t);
+            }
+          }
+        }
+      }
+      if (title === '' && pts.length === 0) {
+        continue;
+      }
+      if (title === '') {
+        title = I18n.t('cw.page').replace('{n}', (slides.length + 1).toString());
+      }
+      slides.push({ page: slides.length + 1, type: type, title: title, points: pts, visual: notes });
+    }
+    return slides.length > 0 ? slides : null;
+  }
+
+  /** 临时页目录名（cacheDir 下），多页 OOXML 片段拆成 slideN.xml 供预览/后续复用 */
+  private static pagesDir(context: common.UIAbilityContext): string {
+    return context.cacheDir + '/courseware_pages';
+  }
+
+  /** 把 AI 直出的逐页片段写成临时多文件（cacheDir/courseware_pages/*.xml）；仅写本此解析出的页 */
+  static async writeCoursewarePages(context: common.UIAbilityContext, text: string): Promise<void> {
+    try {
+      const dir: string = PptxExporter.pagesDir(context);
+      if (!fs.accessSync(dir)) {
+        fs.mkdirSync(dir);
+      }
+      // 先清空旧页文件，避免残留
+      PptxExporter.clearCoursewarePages(context);
+      const slides: CourseSlide[] | null = PptxExporter.parseOoxmlFragments(text);
+      if (slides === null || slides.length === 0) {
+        return;
+      }
+      for (let i: number = 0; i < slides.length; i++) {
+        const file: string = dir + '/slide' + (i + 1) + '.xml';
+        const content: string = 'type=' + slides[i].type + '\ntitle=' + slides[i].title +
+          '\nnotes=' + slides[i].visual + '\nbody=' + slides[i].points.join('｜');
+        const f = fs.openSync(file, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+        fs.writeSync(f.fd, content);
+        fs.closeSync(f);
+      }
+    } catch (e) {
+      // 临时文件非关键路径，失败静默（不影响主预览/导出）
+    }
+  }
+
+  /** 清空临时页目录（下一次生成前调用，自动删除上一轮多文件） */
+  static clearCoursewarePages(context: common.UIAbilityContext): void {
+    try {
+      const dir: string = PptxExporter.pagesDir(context);
+      if (!fs.accessSync(dir)) {
+        return;
+      }
+      const list: string[] = fs.listFileSync(dir);
+      for (let i: number = 0; i < list.length; i++) {
+        try {
+          fs.unlinkSync(dir + '/' + list[i]);
+        } catch (e) {
+          // 忽略单个文件删除失败
+        }
+      }
+      try {
+        fs.rmdirSync(dir);
+      } catch (e) {
+        // 目录非空或占用时忽略
+      }
+    } catch (e) {
+      // 清理失败非关键
+    }
+  }
+
+  /**
    * 从 HTML 课件文档中解析逐页幻灯片（统一 CSS + 逐页 <section class="slide">）。
    * 每页以 data-title/data-type/data-visual 属性与内部 h1/h2/h3/p 文本构成 CourseSlide；
    * 未找到任何 slide 时返回 null。
@@ -189,9 +314,12 @@ export class PptxExporter {
     return slides;
   }
 
-  /** 导出课件为 .pptx 粗稿（兼容 HTML 课件与旧 JSON 大纲两种形态；选择保存位置） */
+  /** 导出课件为 .pptx 粗稿（兼容 AI 直出 OOXML 片段、HTML 课件、旧 JSON 大纲三种形态；选择保存位置） */
   static async exportPptx(context: common.UIAbilityContext, json: string, fileName: string): Promise<void> {
-    let slides: CourseSlide[] | null = PptxExporter.parseHtmlCourseware(json);
+    let slides: CourseSlide[] | null = PptxExporter.parseOoxmlFragments(json);
+    if (slides === null || slides.length === 0) {
+      slides = PptxExporter.parseHtmlCourseware(json);
+    }
     if (slides === null) {
       slides = PptxExporter.parseSlides(json);
     }
@@ -392,6 +520,7 @@ export class PptxExporter {
       '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>' +
       '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' +
       shapes.join('') + '</p:spTree></p:cSld>' +
+      '<p:transition spd="med"><p:fade/></p:transition>' +
       '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>';
   }
 }

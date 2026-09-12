@@ -49,11 +49,16 @@ struct HistoryDetailDialog {
   /** 检测内容是否为课件 HTML（含 <section class="slide">） */
   private isCourseware(): boolean {
     return this.content.indexOf('<section class="slide"') >= 0 ||
-      this.content.indexOf('<section class="slide ') >= 0;
+      this.content.indexOf('<section class="slide ') >= 0 ||
+      this.content.indexOf('=====') >= 0;
   }
 
-  /** 解析课件幻灯片（失败返回空数组） */
+  /** 解析课件幻灯片（优先 AI 直出 OOXML 片段，其次 HTML 课件；失败返回空数组） */
   private coursewareSlides(): CourseSlide[] {
+    const o: CourseSlide[] | null = PptxExporter.parseOoxmlFragments(this.content);
+    if (o !== null && o.length > 0) {
+      return o;
+    }
     const s: CourseSlide[] | null = PptxExporter.parseHtmlCourseware(this.content);
     if (s !== null && s.length > 0) {
       return s;

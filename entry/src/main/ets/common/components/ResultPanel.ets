@@ -92,6 +92,8 @@ export struct ResultPanel {
   exportMode: string = 'word';
   /** 课件大纲预览：true 时把 JSON 渲染为逐页幻灯片框架（白底黑字） */
   slideMode: boolean = false;
+  /** 是否允许进入编辑态：false 时隐藏编辑按钮并禁用编辑（课件页等以成品预览为主的场景） */
+  editable: boolean = true;
   /**
    * 整页滚动模式：预览内容自然撑高（不内嵌独立滚动），由外层页面级 Scroll 统一滚动。
    * 用于"生成完毕后整个功能页下滑、完整显示预览框与顶部操作按钮"的形态；
@@ -852,8 +854,12 @@ export struct ResultPanel {
     .backgroundColor('rgba(0,0,0,0.38)')
   }
 
-  /** 课件：按需渲染幻灯片框架（优先解析 HTML 课件，回退旧 JSON 大纲）；都无法解析时回退富文本显示原文 */
+  /** 课件：按需渲染幻灯片框架（优先解析 AI 直出 OOXML 片段，其次 HTML 课件，回退旧 JSON 大纲）；都无法解析时回退富文本显示原文 */
   private slidesNow(): CourseSlide[] {
+    const o: CourseSlide[] | null = PptxExporter.parseOoxmlFragments(this.result);
+    if (o !== null && o.length > 0) {
+      return o;
+    }
     const html: CourseSlide[] | null = PptxExporter.parseHtmlCourseware(this.result);
     if (html !== null && html.length > 0) {
       return html;
@@ -969,7 +975,7 @@ export struct ResultPanel {
   previewView() {
     Column({ space: 8 }) {
       Row() {
-        if (this.result !== '') {
+        if (this.editable && this.result !== '') {
           Button(this.t('btn.edit'))
             .fontFamily(AppFonts.family())
             .fontSize(13)

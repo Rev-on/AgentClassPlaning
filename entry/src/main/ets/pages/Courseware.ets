@@ -19,8 +19,7 @@ import { AppSettings } from '../common/AppSettings';
 import { AttachFile } from '../common/AttachTypes';
 import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
-import { RichBox } from '../common/components/RichBox';
-import { RichHtml } from '../common/RichHtml';
+import { PptxExporter } from '../common/PptxExporter';
 import { SafeInsets } from '../common/SafeInsets';
 
 /** 从教案页跳转携带的路由参数 */
@@ -49,8 +48,6 @@ export struct CoursewareContent {
   @State importMode: boolean = false;
   /** 生成会话恢复（离开页面后重进仍显示生成中/结果） */
   private sessSub: number = -1;
-  /** 实时预览滚动控制器（生成中自动滚到最底部） */
-  private liveScroll: Scroller = new Scroller();
   /** 完成后整页滚动控制器（自动下滑到结果预览） */
   private doneScroll: Scroller = new Scroller();
   /** 结果预览在整页滚动内容中的顶部偏移（用于完成后自动定位） */
@@ -170,16 +167,17 @@ export struct CoursewareContent {
     this.thinkText = '';
     this.thinkExpanded = true;
     this.thinkRunning = true;
-    // 开始新的生成：清除旧草稿，避免旧结果回魂
+    // 开始新的生成：清除旧草稿，避免旧结果回魂；同时清理上一轮临时多页文件
     PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
+    PptxExporter.clearCoursewarePages(getContext(this) as common.UIAbilityContext);
     let user: string = '';
     if (importText !== '') {
-      // 教案导入模式：直接基于已生成的教案内容生成配套 HTML 课件
+      // 教案导入模式：直接基于已生成的教案内容生成配套的逐页课件内容
       user = '以下是一份已经生成并通过审阅的完整教案：\n' + importText +
-        '\n\n请基于该教案的课题、结构重难点与教学环节，生成配套的整份 HTML 课件（统一 CSS 样式 + 逐页 <section class="slide"> 课件，结构同课件生成要求）。';
+        '\n\n请基于该教案的课题、结构重难点与教学环节，生成配套的逐页课件内容（按课件生成要求逐页输出）。';
     } else {
       const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
-      user = `学科：${this.subject}\n年级：${this.grade}\n课题：${this.topic}\n课型/用途：${this.usage}\n\n请生成该课题的整份 HTML 课件（统一 CSS 样式 + 逐页 <section class="slide"> 课件，并满足 16:9 下完整显示不溢出的要求）。${remarkPart}`;
+      user = `学科：${this.subject}\n年级：${this.grade}\n课题：${this.topic}\n课型/用途：${this.usage}\n\n请生成该课题的逐页课件内容（按课件生成要求逐页输出）。${remarkPart}`;
     }
     try {
       const content: string = await AiService.chat(Prompts.coursewareSystem(), user, (partial: string) => {
@@ -188,8 +186,8 @@ export struct CoursewareContent {
           this.thinkRunning = false;
           this.thinkExpanded = false;
         }
-        this.result = partial;
-        this.scrollLiveToBottom();
+        // 生成中不逐步覆盖 result（仅完成后一次性展示完整预览）
+        void partial;
       }, true, {
         ctx: getContext(this) as common.UIAbilityContext,
         type: 'courseware',
@@ -206,8 +204,10 @@ export struct CoursewareContent {
         this.stopRequested = false;
         return;
       }
-      // 输出本身即 HTML 课件（统一 CSS + 逐页 <section>），整体保留，不做 JSON 规范化
+      // 输出本身即逐页 OOXML 片段，整体保留（不做 HTML/JSON 规范化）
       this.result = content;
+      // 拆成临时多页文件写入缓存目录（下一次生成/清缓存时自动删除）
+      PptxExporter.writeCoursewarePages(getContext(this) as common.UIAbilityContext, content);
       this.autoSaveHistory(content);
       // 结果即时落盘草稿：任何异常退出/进程被杀都能恢复
       PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), content);
@@ -250,22 +250,6 @@ export struct CoursewareContent {
     }).then(() => {
       promptAction.showToast({ message: I18n.t('toast.saved') });
     });
-  }
-
-  /** 生成中：预览框实时滚动到最底部（等一帧让新内容完成布局） */
-  private scrollLiveToBottom(): void {
-    setTimeout((): void => {
-      // 生成完成的这帧会把预览框 Scroller 从布局中移除（切换为整页滚动），
-      // 若此时仍对已销毁的 Scroller 调 scrollEdge，会在原生层崩溃导致闪退，故用 loading 守卫跳过
-      if (!this.loading) {
-        return;
-      }
-      try {
-        this.liveScroll.scrollEdge(Edge.Bottom);
-      } catch (e) {
-        // 预览区尚未挂载时忽略
-      }
-    }, 32);
   }
 
   /** 停止生成：立即取消任务与订阅，保留半截预览文本，回到生成前状态 */
@@ -375,12 +359,6 @@ export struct CoursewareContent {
           .width('100%')
           .padding({ top: 2 })
       }
-      Text(this.t('hint.coursewareJson'))
-        .fontFamily(AppFonts.family())
-        .fontSize(11)
-        .fontColor(this.col('hint'))
-        .width('100%')
-        .lineHeight(16)
     }
     .width('100%')
     .padding(16)
@@ -388,37 +366,15 @@ export struct CoursewareContent {
     .borderRadius(14)
   }
 
-  /** 生成中：仅预览框内部滚动（整页固定，自动滚到底） */
+  /** 生成中：不显示流式内容，仅显示"生成中"提示（结果生成完成后一次性展示） */
   @Builder
   loadingPreview() {
     Column({ space: 8 }) {
-      if (this.result !== '') {
-        // 流式输出中：顶部小字提示 + 内容在预览框内部滚动到底
-        Row({ space: 6 }) {
-          LoadingProgress().width(14).height(14).color('#F0A93F')
-          Text(this.t('gen.streaming'))
-            .fontFamily(AppFonts.family())
-            .fontSize(12)
-            .fontColor(this.col('sub'))
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.Start)
-        .padding({ bottom: 8 })
-        Scroll(this.liveScroll) {
-          RichBox({ html: RichHtml.liveSafe(this.result) })
-            .width('100%')
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .align(Alignment.TopStart)
-        .scrollBar(BarState.Off)
-      } else {
-        Row({ space: 10 }) {
-          LoadingProgress().width(26).height(26).color('#F0A93F')
-          Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
-            .fontFamily(AppFonts.family())
-        }.width('100%').justifyContent(FlexAlign.Center).padding(20)
-      }
+      Row({ space: 10 }) {
+        LoadingProgress().width(26).height(26).color('#F0A93F')
+        Text(this.t('gen.loading')).fontSize(14).fontColor(this.col('sub'))
+          .fontFamily(AppFonts.family())
+      }.width('100%').justifyContent(FlexAlign.Center).padding(20)
     }
     .width('100%')
     .layoutWeight(1)
@@ -483,6 +439,7 @@ export struct CoursewareContent {
                 exportMode: 'pptx',
                 slideMode: true,
                 scrollPage: true,
+                editable: false,
                 onSave: () => this.saveToHistory(),
                 onEdited: (t: string): void => {
                   if (t.trim() === '') {
