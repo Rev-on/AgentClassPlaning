@@ -19,6 +19,10 @@
     {
       "name": "permission_distributed_reason",
       "value": "用于把生成结果流转到平板/2in1继续编辑"
+    },
+    {
+      "name": "permission_vibrate_reason",
+      "value": "手表端上课环节到点时震动提醒"
     }
   ]
 }

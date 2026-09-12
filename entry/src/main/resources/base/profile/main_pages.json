@@ -15,6 +15,7 @@
     "pages/Seats",
     "pages/ClassManager",
     "pages/ClassDetail",
-    "pages/ContinuationResult"
+    "pages/ContinuationResult",
+    "pages/WatchHome"
   ]
 }

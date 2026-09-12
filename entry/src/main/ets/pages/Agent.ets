@@ -18,12 +18,23 @@ import { AgentEngine, AgentArtifact, AgentEvent, AgentHistoryItem } from '../com
 import { TeachingProfile } from '../common/TeachingProfile';
 import { ShareService, ShareItem } from '../common/ShareService';
 
+/** 消息自增序号：保证每条消息有稳定唯一标识，作为 ForEach 的 key */
+let agentMsgSeq: number = 0;
+
 /** 一条对话消息：role=user 为用户输入；role=agent 为编排过程气泡 */
 class AgentMsg {
   role: string = 'agent';
   kind: string = 'text';
   text: string = '';
   artifact: AgentArtifact | undefined = undefined;
+  /** 稳定唯一 id：当一条 thinking 气泡被替换为 done 时 id 变化，才能强制 ForEach 重建组件 */
+  id: number = -1;
+
+  /** 分配下一个唯一 id 并返回自身，便于链式创建 */
+  static next(): number {
+    agentMsgSeq++;
+    return agentMsgSeq;
+  }
 }
 
 @Component
@@ -62,6 +73,7 @@ export struct AgentContent {
       const m: AgentMsg = new AgentMsg();
       m.role = 'agent';
       m.kind = 'empty';
+      m.id = AgentMsg.next();
       m.text = this.t('agent.empty');
       this.messages.push(m);
       this.emptyShown = true;
@@ -114,6 +126,7 @@ export struct AgentContent {
     const um: AgentMsg = new AgentMsg();
     um.role = 'user';
     um.kind = 'text';
+    um.id = AgentMsg.next();
     um.text = req;
     this.messages.push(um);
     this.input = '';
@@ -132,6 +145,7 @@ export struct AgentContent {
               const done = new AgentMsg();
               done.role = 'agent';
               done.kind = 'done';
+              done.id = AgentMsg.next();
               done.text = e.text;
               next[i] = done;
             }
@@ -141,6 +155,7 @@ export struct AgentContent {
         const m: AgentMsg = new AgentMsg();
         m.role = 'agent';
         m.kind = e.kind;
+        m.id = AgentMsg.next();
         m.text = e.text;
         if (e.artifact !== undefined) {
           m.artifact = e.artifact;
@@ -163,6 +178,7 @@ export struct AgentContent {
       const mf: AgentMsg = new AgentMsg();
       mf.role = 'agent';
       mf.kind = 'error';
+      mf.id = AgentMsg.next();
       mf.text = this.t('err.genFail') + ((e as Error).message !== undefined ? (e as Error).message : '');
       this.messages.push(mf);
       this.scrollBottom();
@@ -177,6 +193,7 @@ export struct AgentContent {
           const stop = new AgentMsg();
           stop.role = 'agent';
           stop.kind = 'done';
+          stop.id = AgentMsg.next();
           stop.text = tail[i].text.replace('正在生成', '').replace('…', '').trim() + '已结束';
           tail[i] = stop;
           changed = true;
@@ -487,7 +504,7 @@ export struct AgentContent {
         Column({ space: 10 }) {
           ForEach(this.messages, (m: AgentMsg, idx: number) => {
             this.renderMsg(m, idx)
-          }, (m: AgentMsg, idx: number) => idx.toString())
+          }, (m: AgentMsg) => m.id.toString())
         }
         .width('100%')
         .padding(12)

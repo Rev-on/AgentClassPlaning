@@ -74,6 +74,8 @@ export class I18n {
     ['cont.title', '流转接收'],
     ['cont.hint', '已从其他设备收到结果，可在下方继续编辑或导出'],
     ['cont.empty', '暂无可流转的内容'],
+    ['watch.pushed', '已推送教案到手表，请打开手表开始上课'],
+    ['watch.pushFail', '推送手表失败，请确认手表已连接并登录同一账号'],
     ['err.continuationFail', '流转失败，请确认设备已登录同一账号并联网'],
     ['btn.close', '关闭'],
     ['btn.confirm', '知道了'],

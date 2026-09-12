@@ -13,6 +13,7 @@ import { I18n } from '../common/I18n';
 import { AppFonts } from '../common/AppFonts';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
 import { ContinuationService } from '../common/ContinuationService';
+import { WatchLayout } from '../common/WatchLayout';
 
 /** 单个粒子 */
 interface Particle {
@@ -323,6 +324,13 @@ struct Splash {
   }
 
   private goIndex(): void {
+    // 手表端：直达"上课指挥"页（无办公桌/首页，专注收教案→上课）
+    if (WatchLayout.isWatch()) {
+      this.getUIContext().getRouter().replaceUrl({ url: 'pages/WatchHome' }).catch(() => {
+        // 路由失败保持当前页
+      });
+      return;
+    }
     // 分布式软总线流转接收：若存在未消费的流转结果，则直达"流转接收"页继续编辑
     const continued: boolean = ContinuationService.hasInbox();
     const target: string = continued ? 'pages/ContinuationResult' : 'pages/Index';

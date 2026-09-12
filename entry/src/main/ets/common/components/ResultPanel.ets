@@ -17,6 +17,8 @@ import { RichBox } from './RichBox';
 import { DocxExporter } from '../DocxExporter';
 import { PptxExporter, CourseSlide } from '../PptxExporter';
 import { ContinuationService } from '../ContinuationService';
+import { LessonPlanParser, LessonStage } from '../LessonPlanParser';
+import { WatchLink } from '../WatchLink';
 
 /** 编辑器可用的强调色板 */
 const FONT_COLORS: string[] = ['#E5484D', '#E8930C', '#30A46C', '#0091FF', '#6E56CF', '#AD1FAC', '#0E7490', '#8B4513'];
@@ -278,10 +280,24 @@ export struct ResultPanel {
     }
   }
 
-  /** 流转：把当前生成的富文本结果通过分布式软总线流转到平板/2in1继续编辑 */
-  private startContinue(content: string): void {
+  /**
+   * 流转：当前结果通过分布式软总线流转到其它设备。
+   * 教案特殊分流：组网内若发现手表(可穿戴)设备，则不流转富文本，而是把解析出的
+   * "环节分钟表"推送至手表端，供手表开展"开始上课 → 分环节计时"；否则保持原有富文本流转。
+   */
+  private async startContinue(content: string): Promise<void> {
     if (content === '' || !this.showContinue) {
       return;
+    }
+    const ctx = getContext(this) as common.UIAbilityContext;
+    if (LessonPlanParser.isPlanType(this.type) && WatchLink.supported()) {
+      const wearable: boolean = await WatchLink.hasWearable(ctx);
+      if (wearable) {
+        const stages: LessonStage[] = LessonPlanParser.parse(content);
+        const ok: boolean = await WatchLink.pushPlan(ctx, stages);
+        promptAction.showToast({ message: I18n.t(ok ? 'watch.pushed' : 'watch.pushFail') });
+        return;
+      }
     }
     // 先暂存当前结果，供 EntryAbility.onContinue 打包瞬间读取（设备选择器停留期间均可打包）
     ContinuationService.stash(content, this.title, this.type, this.exportMode, this.slideMode);
