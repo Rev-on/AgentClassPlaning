@@ -12,6 +12,7 @@ import { AppTheme } from '../common/AppTheme';
 import { I18n } from '../common/I18n';
 import { AppFonts } from '../common/AppFonts';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
+import { ContinuationService } from '../common/ContinuationService';
 
 /** 单个粒子 */
 interface Particle {
@@ -322,10 +323,14 @@ struct Splash {
   }
 
   private goIndex(): void {
+    // 分布式软总线流转接收：若存在未消费的流转结果，则直达"流转接收"页继续编辑
+    const continued: boolean = ContinuationService.hasInbox();
+    const target: string = continued ? 'pages/ContinuationResult' : 'pages/Index';
     // ArkUI-X 跨端：使用 UIContext 路由（router.replaceUrl 不支持跨平台）
-    this.getUIContext().getRouter().replaceUrl({ url: 'pages/Index' }).catch(() => {
+    this.getUIContext().getRouter().replaceUrl({ url: target }).catch(
+() => {
       setTimeout(() => {
-        this.getUIContext().getRouter().replaceUrl({ url: 'pages/Index' }).catch(() => {
+        this.getUIContext().getRouter().replaceUrl({ url: target }).catch(() => {
           // 再次失败则停留在当前页
         });
       }, 800);

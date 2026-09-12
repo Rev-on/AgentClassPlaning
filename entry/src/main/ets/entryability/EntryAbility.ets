@@ -4,12 +4,27 @@ import { KeyboardAvoidMode, window } from '@kit.ArkUI';
 import deviceInfo from '@ohos.deviceInfo';
 import { AppSettings } from '../common/AppSettings';
 import { AppTheme } from '../common/AppTheme';
+import { ContinuationService } from '../common/ContinuationService';
 
 const DOMAIN = 0x0000;
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+    // 分布式软总线流转接收：目标设备冷启动时从 Want 提取流转来的生成结果并写入收件箱
+    ContinuationService.inboxFromWant(want);
+  }
+
+  /** 源端：用户选定目标设备后，框架回调这里把当前生成结果写入 Want 完成流转 */
+  onContinue(wantParam: Record<string, Object>): AbilityConstant.OnContinueResult {
+    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onContinue');
+    return ContinuationService.buildWant(wantParam);
+  }
+
+  /** 分布式软总线流转接收：目标设备已运行（热启动）时也能接收 flow 过来的结果 */
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onNewWant');
+    ContinuationService.inboxFromWant(want);
   }
 
   onDestroy(): void {

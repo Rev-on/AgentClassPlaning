@@ -14,9 +14,9 @@ import { AppSettings } from '../common/AppSettings';
 import { SafeInsets } from '../common/SafeInsets';
 import { PageHeader } from '../common/components/PageHeader';
 import { RichBox } from '../common/components/RichBox';
-import { AgentEngine, AgentArtifact, AgentEvent } from '../common/AgentEngine';
+import { AgentEngine, AgentArtifact, AgentEvent, AgentHistoryItem } from '../common/AgentEngine';
 import { TeachingProfile } from '../common/TeachingProfile';
-import { ShareService } from '../common/ShareService';
+import { ShareService, ShareItem } from '../common/ShareService';
 
 /** 一条对话消息：role=user 为用户输入；role=agent 为编排过程气泡 */
 class AgentMsg {
@@ -79,6 +79,24 @@ export struct AgentContent {
     }, 40);
   }
 
+  /**
+   * 多轮续聊：把当前对话提取为历史上下文传给编排引擎。
+   * 仅纳入实质内容（用户提问 + 各产物完成消息），略去"正在生成…"等过程气泡，
+   * 且不含产物正文，避免上下文被大段内容撑爆（过长时由引擎统一压缩）。
+   */
+  private buildHistory(): AgentHistoryItem[] {
+    const hist: AgentHistoryItem[] = [];
+    for (let i: number = 0; i < this.messages.length; i++) {
+      const m: AgentMsg = this.messages[i];
+      if (m.role === 'user' && m.kind === 'text' && m.text.trim() !== '') {
+        hist.push({ speaker: 'user', text: m.text });
+      } else if (m.role === 'agent' && m.kind === 'step' && m.text.trim() !== '') {
+        hist.push({ speaker: 'agent', text: m.text });
+      }
+    }
+    return hist;
+  }
+
   /** 发起一次 Agent 编排 */
   private async runAgent(): Promise<void> {
     const req: string = this.input.trim();
@@ -102,8 +120,24 @@ export struct AgentContent {
     this.scrollBottom();
 
     const ctx = getContext(this) as common.UIAbilityContext;
+    // 携带多轮对话历史，让 Agent 记住前面的需求与产出，续聊时保持一致
+    const history: AgentHistoryItem[] = this.buildHistory();
     try {
-      const result = await AgentEngine.run(ctx, req, (e: AgentEvent): void => {
+      const result = await AgentEngine.run(ctx, req, history, (e: AgentEvent): void => {
+        // 步骤完成：把所有残留的"正在生成…"气泡就地更新为"生成完成"，避免残留加载态
+        if (e.kind === 'step') {
+          const next = this.messages.slice();
+          for (let i = 0; i < next.length; i++) {
+            if (next[i].kind === 'thinking') {
+              const done = new AgentMsg();
+              done.role = 'agent';
+              done.kind = 'done';
+              done.text = e.text;
+              next[i] = done;
+            }
+          }
+          this.messages = next;
+        }
         const m: AgentMsg = new AgentMsg();
         m.role = 'agent';
         m.kind = e.kind;
@@ -134,6 +168,23 @@ export struct AgentContent {
       this.scrollBottom();
     } finally {
       this.loading = false;
+      // 兜底：编排已结束（每个 await 均已落定），把任何残留的"正在生成…"气泡转为完成态，
+      // 杜绝个别失败/异常路径遗留加载转圈
+      let changed: boolean = false;
+      const tail = this.messages.slice();
+      for (let i = 0; i < tail.length; i++) {
+        if (tail[i].kind === 'thinking') {
+          const stop = new AgentMsg();
+          stop.role = 'agent';
+          stop.kind = 'done';
+          stop.text = tail[i].text.replace('正在生成', '').replace('…', '').trim() + '已结束';
+          tail[i] = stop;
+          changed = true;
+        }
+      }
+      if (changed) {
+        this.messages = tail;
+      }
       this.scrollBottom();
     }
   }
@@ -148,7 +199,61 @@ export struct AgentContent {
       art.content, 'agentShare' + (idx + 1));
   }
 
-  /** 产物气泡标题（本地化显示） */
+  /** 已生成的产物份数（带产物内容的 step 消息） */
+  private artifactCount(): number {
+    let n: number = 0;
+    for (let i: number = 0; i < this.messages.length; i++) {
+      const m: AgentMsg = this.messages[i];
+      if (m.kind === 'step' && m.artifact !== undefined && m.artifact.content !== '') {
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /** 打包全部产物一次性分享 */
+  private shareAll(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    const items: ShareItem[] = [];
+    for (let i: number = 0; i < this.messages.length; i++) {
+      const m: AgentMsg = this.messages[i];
+      if (m.kind === 'step' && m.artifact !== undefined && m.artifact.content !== '') {
+        items.push({
+          kind: m.artifact.key === 'courseware' ? 'courseware' : 'doc',
+          label: m.artifact.label,
+          content: m.artifact.content
+        });
+      }
+    }
+    if (items.length === 0) {
+      return;
+    }
+    ShareService.exportAndShareBatch(ctx, items, 'agentShareAll');
+  }
+
+  /** 底部"打包分享全部"工具条：生成完成后出现 */
+  @Builder
+  packBar() {
+    Button() {
+      Row({ space: 6 }) {
+        Text('📦').fontSize(14).fontColor('#FFFFFF')
+        Text(this.t('agent.shareAll').replace('{n}', this.artifactCount().toString()))
+          .fontFamily(AppFonts.family())
+          .fontSize(13)
+          .fontColor('#FFFFFF')
+      }
+    }
+    .width('100%')
+    .height(40)
+    .backgroundColor('#27AE60')
+    .borderRadius(8)
+    .id('agentShareAll')
+    .onClick(() => {
+      this.shareAll();
+    })
+  }
+
+  /** 产物气泡标题（本地化显示，覆盖全部 7 类生成功能） */
   private artTitle(key: string): string {
     if (key === 'plan') {
       return this.t('agent.plan');
@@ -158,6 +263,18 @@ export struct AgentContent {
     }
     if (key === 'quiz') {
       return this.t('agent.quiz');
+    }
+    if (key === 'research') {
+      return this.t('card.research');
+    }
+    if (key === 'analysis') {
+      return this.t('card.analysis');
+    }
+    if (key === 'report') {
+      return this.t('card.report');
+    }
+    if (key === 'talk') {
+      return this.t('card.talk');
     }
     return this.t('agent.plan');
   }
@@ -380,6 +497,11 @@ export struct AgentContent {
       .layoutWeight(1)
       .scrollBar(BarState.Auto)
       .align(Alignment.TopStart)
+
+      // 生成完成后：显示"打包分享全部"工具条
+      if (!this.loading && this.artifactCount() > 0) {
+        this.packBar()
+      }
 
       this.inputBar()
     }

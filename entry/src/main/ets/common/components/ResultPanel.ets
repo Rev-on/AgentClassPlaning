@@ -16,6 +16,7 @@ import { RichHtml, RichRun, StyleOp } from '../RichHtml';
 import { RichBox } from './RichBox';
 import { DocxExporter } from '../DocxExporter';
 import { PptxExporter, CourseSlide } from '../PptxExporter';
+import { ContinuationService } from '../ContinuationService';
 
 /** 编辑器可用的强调色板 */
 const FONT_COLORS: string[] = ['#E5484D', '#E8930C', '#30A46C', '#0091FF', '#6E56CF', '#AD1FAC', '#0E7490', '#8B4513'];
@@ -96,6 +97,8 @@ export struct ResultPanel {
   editable: boolean = true;
   /** 是否显示复制按钮：false 时隐藏（课件页等以导出为主的场景） */
   showCopy: boolean = true;
+  /** 是否显示"流转"按钮：true 时可在有结果时把当前结果通过分布式软总线流转到平板/2in1继续编辑 */
+  showContinue: boolean = true;
   /**
    * 整页滚动模式：预览内容自然撑高（不内嵌独立滚动），由外层页面级 Scroll 统一滚动。
    * 用于"生成完毕后整个功能页下滑、完整显示预览框与顶部操作按钮"的形态；
@@ -273,6 +276,16 @@ export struct ResultPanel {
     } else {
       this.exportWord(content);
     }
+  }
+
+  /** 流转：把当前生成的富文本结果通过分布式软总线流转到平板/2in1继续编辑 */
+  private startContinue(content: string): void {
+    if (content === '' || !this.showContinue) {
+      return;
+    }
+    // 先暂存当前结果，供 EntryAbility.onContinue 打包瞬间读取（设备选择器停留期间均可打包）
+    ContinuationService.stash(content, this.title, this.type, this.exportMode, this.slideMode);
+    ContinuationService.startContinuation();
   }
 
   // ============ 编辑态：载入 ============
@@ -976,45 +989,61 @@ export struct ResultPanel {
   @Builder
   previewView() {
     Column({ space: 8 }) {
-      Row() {
-        if (this.editable && this.result !== '') {
-          Button(this.t('btn.edit'))
+      // 操作按钮可横向滚动：手机窄屏下按钮超出宽度时滑动查看，避免溢出裁切
+      Scroll() {
+        Row() {
+          if (this.editable && this.result !== '') {
+            Button(this.t('btn.edit'))
+              .fontFamily(AppFonts.family())
+              .fontSize(13)
+              .height(30)
+              .backgroundColor('#7A6BC4')
+              .onClick(() => this.openEditor())
+          }
+          if (this.showCopy) {
+            Button(this.t('btn.copy'))
+              .fontFamily(AppFonts.family())
+              .fontSize(13)
+              .height(30)
+              .margin({ left: this.editable && this.result !== '' ? 8 : 0 })
+              .backgroundColor('#4A90D9')
+              .onClick(() => this.copyText(this.result))
+          }
+          Button(this.exportLabel())
             .fontFamily(AppFonts.family())
             .fontSize(13)
             .height(30)
-            .backgroundColor('#7A6BC4')
-            .onClick(() => this.openEditor())
-        }
-        Blank()
-        if (this.showCopy) {
-          Button(this.t('btn.copy'))
+            .backgroundColor('#2F6DB5')
+            .margin({ left: 8 })
+            .onClick(() => this.doExport(this.result))
+          Button(this.t('btn.saveHist'))
             .fontFamily(AppFonts.family())
             .fontSize(13)
             .height(30)
-            .backgroundColor('#4A90D9')
-            .onClick(() => this.copyText(this.result))
+            .backgroundColor('#5BA8A0')
+            .margin({ left: 8 })
+            .onClick(() => {
+              if (this.result !== '') {
+                this.onSave();
+              }
+            })
+          if (this.showContinue && this.result !== '') {
+            Button(this.t('btn.continue'))
+              .fontFamily(AppFonts.family())
+              .fontSize(13)
+              .height(30)
+              .backgroundColor('#E8930C')
+              .margin({ left: 8 })
+              .onClick(() => this.startContinue(this.result))
+          }
         }
-        Button(this.exportLabel())
-          .fontFamily(AppFonts.family())
-          .fontSize(13)
-          .height(30)
-          .backgroundColor('#2F6DB5')
-          .margin({ left: 8 })
-          .onClick(() => this.doExport(this.result))
-        Button(this.t('btn.saveHist'))
-          .fontFamily(AppFonts.family())
-          .fontSize(13)
-          .height(30)
-          .backgroundColor('#5BA8A0')
-          .margin({ left: 8 })
-          .onClick(() => {
-            if (this.result !== '') {
-              this.onSave();
-            }
-          })
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 4, right: 4 })
       }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
       .width('100%')
-      .padding({ left: 4, right: 4 })
+      .align(Alignment.Start)
 
       if (this.scrollPage) {
         // 整页滚动模式：正文自然撑高，与顶部操作按钮一起随外层页面级别 Scroll 滚动，

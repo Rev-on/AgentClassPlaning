@@ -9,17 +9,28 @@
  */
 import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
+import zlib from '@ohos.zlib';
 import { systemShare } from '@kit.ShareKit';
-import { fileUri } from '@kit.CoreFileKit';
+import { fileUri, fileIo as fs } from '@kit.CoreFileKit';
 import { DocxExporter } from './DocxExporter';
 import { PptxExporter } from './PptxExporter';
 import { I18n } from './I18n';
+
+/** 参与打包分享的单份产物 */
+export interface ShareItem {
+  /** 产物类型：'courseware' → PPTX；其余 → Word（docx） */
+  kind: string;
+  label: string;
+  content: string;
+}
 
 export class ShareService {
   /** PPTX 统一类型描述符 */
   private static readonly UTD_PPTX: string = 'org.openxmlformats.presentationml.presentation';
   /** DOCX 统一类型描述符 */
   private static readonly UTD_DOCX: string = 'org.openxmlformats.wordprocessingml.document';
+  /** ZIP 压缩包统一类型描述符（单文件分享，接收方按其通用文件类型处理） */
+  private static readonly UTD_ZIP: string = 'general.file';
 
   /**
    * 导出产物并通过系统分享面板分享。
@@ -65,6 +76,86 @@ export class ShareService {
       const msg: string = e instanceof Error && e.message !== '' ?
         e.message : I18n.t('err.export');
       void promptAction.showToast({ message: msg });
+    }
+  }
+
+  /**
+   * 把多份产物打包为一个 ZIP 压缩包，再以"单个文件"方式分享：
+   * 逐份导出为沙箱文件（课件→.pptx；其余→.docx）→ zlib.compressFiles 压缩为 ≤1 个 zip →
+   * 以 SINGLE 模式拉起系统分享面板分发，接收方一次性拿到全部备课产物。
+   * 完成后清理临时产物与压缩包。
+   * @param ctx 上下文
+   * @param items 待打包分享的多份产物
+   * @param anchorId 可选：锚点组件 id，让分享面板贴近触发按钮
+   */
+  static async exportAndShareBatch(ctx: common.UIAbilityContext, items: ShareItem[],
+    anchorId?: string): Promise<void> {
+    if (items.length === 0) {
+      return;
+    }
+    let zipPath: string = '';
+    const produced: string[] = [];
+    try {
+      // 1) 逐份导出为沙箱文件
+      for (let i: number = 0; i < items.length; i++) {
+        const it: ShareItem = items[i];
+        const safe: string = ShareService.fileNameOf(it.label);
+        let filePath: string = '';
+        if (it.kind === 'courseware') {
+          filePath = await PptxExporter.exportPptxToFile(ctx, it.content, safe + '.pptx');
+        } else {
+          filePath = await DocxExporter.exportDocxToFile(ctx, it.content, safe + '.docx');
+        }
+        produced.push(filePath);
+      }
+      // 2) 打包为单个 ZIP
+      zipPath = ctx.filesDir + '/备课产物_' + Date.now() + '.zip';
+      await zlib.compressFiles(produced, zipPath, {
+        level: zlib.CompressLevel.COMPRESS_LEVEL_DEFAULT_COMPRESSION
+      });
+      // 3) 分享单个压缩包
+      const uri: string = fileUri.getUriFromPath(zipPath);
+      const record: systemShare.SharedRecord = {
+        utd: ShareService.UTD_ZIP,
+        uri: uri,
+        title: '备课产物压缩包',
+        label: '备课产物压缩包',
+        description: '共 ' + items.length + ' 份文件'
+      };
+      const data: systemShare.SharedData = new systemShare.SharedData(record);
+      const controller: systemShare.ShareController = new systemShare.ShareController(data);
+      const options: systemShare.ShareControllerOptions = {
+        selectionMode: systemShare.SelectionMode.SINGLE,
+        previewMode: systemShare.SharePreviewMode.DETAIL
+      };
+      if (anchorId !== undefined && anchorId !== '') {
+        options.anchor = anchorId;
+      }
+      await controller.show(ctx, options);
+    } catch (e) {
+      const msg: string = e instanceof Error && e.message !== '' ?
+        e.message : I18n.t('err.export');
+      void promptAction.showToast({ message: msg });
+    } finally {
+      // 4) 清理临时产物与压缩包，避免沙箱堆积
+      for (let i: number = 0; i < produced.length; i++) {
+        try {
+          if (fs.accessSync(produced[i])) {
+            fs.unlinkSync(produced[i]);
+          }
+        } catch (e) {
+          // 单个文件清理失败不影响其它
+        }
+      }
+      if (zipPath !== '') {
+        try {
+          if (fs.accessSync(zipPath)) {
+            fs.unlinkSync(zipPath);
+          }
+        } catch (e) {
+          // 忽略
+        }
+      }
     }
   }
 

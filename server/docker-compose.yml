@@ -1,0 +1,42 @@
+# Rev TechingMaster AI 中转代理 —— Docker Compose 编排
+# 用法：在 server/ 目录下执行 `docker compose up -d --build`
+#
+# 说明：
+#  - 密钥全部来自本目录 .env（勿提交仓库），Compose 自动读取同名 .env；
+#    dotenv 不会覆盖已注入的环境变量，因此 Compose 注入优先于容器内 .env。
+#  - 容器内 TLS 证书路径指向挂载的宿主机证书目录（沿用现有 /etc/ssl/rev-on.site/）。
+#  - 若暂无证书（如首次 HTTP 试用），注释掉 SSL_CERT/SSL_KEY 并将 TLSCONFIG 置为 false。
+
+services:
+  rev-techingmaster-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rev-techingmaster-ai:latest
+    container_name: rev-techingmaster-ai
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # TLS 显式启用；证书挂载在下方 volumes（路径与容器内一致）
+      TLS_ENABLED: "true"
+      SSL_CERT: /etc/ssl/rev-on.site/server.pem
+      SSL_KEY: /etc/ssl/rev-on.site/private_key.pem
+      HOST: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      # 复用宿主机已配置的 TLS 证书（只读挂载）
+      - /etc/ssl/rev-on.site:/etc/ssl/rev-on.site:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
