@@ -989,61 +989,64 @@ export struct ResultPanel {
   @Builder
   previewView() {
     Column({ space: 8 }) {
-      // 操作按钮可横向滚动：手机窄屏下按钮超出宽度时滑动查看，避免溢出裁切
-      Scroll() {
-        Row() {
-          if (this.editable && this.result !== '') {
-            Button(this.t('btn.edit'))
-              .fontFamily(AppFonts.family())
-              .fontSize(13)
-              .height(30)
-              .backgroundColor('#7A6BC4')
-              .onClick(() => this.openEditor())
-          }
-          if (this.showCopy) {
-            Button(this.t('btn.copy'))
-              .fontFamily(AppFonts.family())
-              .fontSize(13)
-              .height(30)
-              .margin({ left: this.editable && this.result !== '' ? 8 : 0 })
-              .backgroundColor('#4A90D9')
-              .onClick(() => this.copyText(this.result))
-          }
-          Button(this.exportLabel())
+      // 第一排：复制 / 导出 / 保存到历史（等分整行，任何宽度不溢出）
+      Row({ space: 8 }) {
+        if (this.showCopy) {
+          Button(this.t('btn.copy'))
             .fontFamily(AppFonts.family())
             .fontSize(13)
             .height(30)
-            .backgroundColor('#2F6DB5')
-            .margin({ left: 8 })
-            .onClick(() => this.doExport(this.result))
-          Button(this.t('btn.saveHist'))
-            .fontFamily(AppFonts.family())
-            .fontSize(13)
-            .height(30)
-            .backgroundColor('#5BA8A0')
-            .margin({ left: 8 })
-            .onClick(() => {
-              if (this.result !== '') {
-                this.onSave();
-              }
-            })
-          if (this.showContinue && this.result !== '') {
-            Button(this.t('btn.continue'))
-              .fontFamily(AppFonts.family())
-              .fontSize(13)
-              .height(30)
-              .backgroundColor('#E8930C')
-              .margin({ left: 8 })
-              .onClick(() => this.startContinue(this.result))
-          }
+            .layoutWeight(1)
+            .backgroundColor('#4A90D9')
+            .onClick(() => this.copyText(this.result))
         }
-        .alignItems(VerticalAlign.Center)
-        .padding({ left: 4, right: 4 })
+        Button(this.exportLabel())
+          .fontFamily(AppFonts.family())
+          .fontSize(13)
+          .height(30)
+          .layoutWeight(1)
+          .backgroundColor('#2F6DB5')
+          .onClick(() => this.doExport(this.result))
+        Button(this.t('btn.saveHist'))
+          .fontFamily(AppFonts.family())
+          .fontSize(13)
+          .height(30)
+          .layoutWeight(1)
+          .backgroundColor('#5BA8A0')
+          .onClick(() => {
+            if (this.result !== '') {
+              this.onSave();
+            }
+          })
       }
-      .scrollable(ScrollDirection.Horizontal)
-      .scrollBar(BarState.Off)
       .width('100%')
-      .align(Alignment.Start)
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 4, right: 4 })
+
+      // 第二排：编辑 / 流转（等分整行，始终在第二排完整可见）
+      Row({ space: 8 }) {
+        if (this.editable && this.result !== '') {
+          Button(this.t('btn.edit'))
+            .fontFamily(AppFonts.family())
+            .fontSize(13)
+            .height(30)
+            .layoutWeight(1)
+            .backgroundColor('#7A6BC4')
+            .onClick(() => this.openEditor())
+        }
+        if (this.showContinue && this.result !== '' && ContinuationService.supported()) {
+          Button(this.t('btn.continue'))
+            .fontFamily(AppFonts.family())
+            .fontSize(13)
+            .height(30)
+            .layoutWeight(1)
+            .backgroundColor('#E8930C')
+            .onClick(() => this.startContinue(this.result))
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 4, right: 4 })
 
       if (this.scrollPage) {
         // 整页滚动模式：正文自然撑高，与顶部操作按钮一起随外层页面级别 Scroll 滚动，

@@ -6,8 +6,14 @@
  *   EntryAbility.onContinue，这里把暂存内容的富文本与元数据写入 Want，返回 AGREE 完成流转。
  * 目标端（平板/2in1）：EntryAbility.onCreate/onNewWant 收到带流转载荷的 Want，写入 AppStorage
  *   收件箱；Splash 启动时检测到收件箱 → 打开「流转接收」页继续编辑/导出。
+ *
+ * 跨平台（ArkUI-X）：分布式软总线为鸿蒙专有能力，安卓/iOS 无对应实现。
+ *   这里用 //#if OHOS 把 continuationManager 的引用在安卓侧编译期移除，并通过
+ *   supported() 让各端判断是否展示「流转」入口（安卓/其它平台自动隐藏，仅保留其它功能）。
  */
+//#if OHOS
 import continuationManager from '@ohos.continuation.continuationManager';
+//#endif
 import promptAction from '@ohos.promptAction';
 import { Want, AbilityConstant } from '@kit.AbilityKit';
 import { I18n } from './I18n';
@@ -46,8 +52,18 @@ export class ContinuationService {
     AppStorage.setOrCreate(ContinuationService.AR_INBOX, JSON.stringify(p));
   }
 
+  /** 是否支持分布式软总线流转（仅鸿蒙为 true；安卓/其它平台编译期剔除后为 false） */
+  static supported(): boolean {
+    let ok: boolean = false;
+    //#if OHOS
+    ok = true;
+    //#endif
+    return ok;
+  }
+
   /** 源端：注册流转服务并拉起系统设备选择器（用户选择目标设备后框架自动回调 onContinue） */
   static async startContinuation(): Promise<void> {
+    //#if OHOS
     try {
       const token: number = await continuationManager.registerContinuation();
       // 设备被选中后由系统回调 onContinue 完成数据打包，这里仅订阅保持连接态即可
@@ -58,6 +74,7 @@ export class ContinuationService {
     } catch (e) {
       promptAction.showToast({ message: I18n.t('err.continuationFail') });
     }
+    //#endif
   }
 
   /** 源端：把共享区内容写入 Want 并返回流转结果（由 EntryAbility.onContinue 调用） */
