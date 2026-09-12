@@ -118,7 +118,7 @@ export class PptxExporter {
         break;
       }
       const name: string = PptxExporter.htmlTagName(inner.substring(lt, gt + 1));
-      const close: string = (name === 'p' || name === 'h1' || name === 'h2' || name === 'h3')
+      const close: string = (name === 'p' || name === 'h1' || name === 'h2' || name === 'h3' || name === 'li' || name === 'td' || name === 'th')
         ? '</' + name + '>'
         : '';
       if (close === '') {
@@ -296,7 +296,7 @@ export class PptxExporter {
 
   /** 文本形状（白底黑字；可含多段要点） */
   private static shapeXml(id: number, x: number, y: number, cx: number, cy: number,
-    lines: string[], bold: boolean, sz: number, color: string, prefix: boolean): string {
+    lines: string[], bold: boolean, sz: number, color: string, prefix: boolean, fillClr: string): string {
     const paras: string[] = [];
     for (let i: number = 0; i < lines.length; i++) {
       const text: string = prefix ? '•  ' + lines[i] : lines[i];
@@ -308,42 +308,87 @@ export class PptxExporter {
         '<a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill></a:rPr>' +
         '<a:t>' + PptxExporter.escapeXml(text) + '</a:t></a:r></a:p>');
     }
+    const fill: string = fillClr !== ''
+      ? '<a:solidFill><a:srgbClr val="' + fillClr + '"/></a:solidFill>'
+      : '<a:noFill/>';
     return '<p:sp><p:nvSpPr><p:cNvPr id="' + id + '" name="Shape ' + id + '"/><p:cNvSpPr txBox="1"/><p:nvPr/>' +
       '</p:nvSpPr><p:spPr><a:xfrm><a:off x="' + x + '" y="' + y + '"/><a:ext cx="' + cx + '" cy="' + cy + '"/>' +
-      '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr>' +
+      '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' + fill + '<a:ln><a:noFill/></a:ln></p:spPr>' +
       '<p:txBody><a:bodyPr wrap="square" anchor="t"><a:normAutofit/></a:bodyPr><a:lstStyle/>' +
       paras.join('') + '</p:txBody></p:sp>';
+  }
+
+  /** 纯填充矩形（无文字）：顶部装饰条 */
+  private static rectXml(id: number, x: number, y: number, cx: number, cy: number, fillClr: string): string {
+    return '<p:sp><p:nvSpPr><p:cNvPr id="' + id + '" name="Bar ' + id + '"/><p:cNvSpPr/><p:nvPr/>' +
+      '</p:nvSpPr><p:spPr><a:xfrm><a:off x="' + x + '" y="' + y + '"/><a:ext cx="' + cx + '" cy="' + cy + '"/>' +
+      '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' +
+      '<a:solidFill><a:srgbClr val="' + fillClr + '"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>';
+  }
+
+  /** 填充矩形+居中文字：页型徽章 */
+  private static badgeXml(id: number, x: number, y: number, text: string, bgClr: string, txtClr: string, sz: number): string {
+    return '<p:sp><p:nvSpPr><p:cNvPr id="' + id + '" name="Badge ' + id + '"/><p:cNvSpPr txBox="1"/><p:nvPr/>' +
+      '</p:nvSpPr><p:spPr><a:xfrm><a:off x="' + x + '" y="' + y + '"/><a:ext cx="340000" cy="260000"/>' +
+      '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' +
+      '<a:solidFill><a:srgbClr val="' + bgClr + '"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>' +
+      '<p:txBody><a:bodyPr wrap="square" anchor="ctr"><a:normAutofit/></a:bodyPr><a:lstStyle/>' +
+      '<a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="' + I18n.bcp47() + '" sz="' + sz + '" b="1" dirty="0">' +
+      '<a:solidFill><a:srgbClr val="' + txtClr + '"/></a:solidFill></a:rPr>' +
+      '<a:t>' + PptxExporter.escapeXml(text) + '</a:t></a:r></a:p></p:txBody></p:sp>';
   }
 
   /** 单页幻灯片 XML */
   private static slideXml(slide: CourseSlide, index: number, total: number): string {
     const W: number = 12192000;
-    const H: number = 6858000;
     const left: number = 548640;
     const contentW: number = W - 548640 * 2;
-    // 角标行（页号·类型）
+    let bgClr: string = 'FFFFFF';
+    let titleClr: string = '1F2937';
+    let accentClr: string = '4A90D9';
+    let bodyClr: string = '333333';
+    let badgeBg: string = 'E8F1FB';
+    let badgeText: string = '2B4C7E';
+    const tp: string = slide.type;
+    if (tp === '封面') {
+      bgClr = '1A365D'; titleClr = 'FFFFFF'; accentClr = '4A90D9'; bodyClr = 'E0E7EF'; badgeBg = '4A90D9'; badgeText = 'FFFFFF';
+    } else if (tp === '导入') {
+      bgClr = 'FFF8E1'; titleClr = 'E65100'; accentClr = 'FF9800'; bodyClr = '5D4037'; badgeBg = 'FFE0B2'; badgeText = 'E65100';
+    } else if (tp === '讲解') {
+      bgClr = 'F0F4FA'; titleClr = '1A365D'; accentClr = '4A90D9'; bodyClr = '374151'; badgeBg = 'E8F1FB'; badgeText = '2B4C7E';
+    } else if (tp === '例题') {
+      bgClr = 'FFF3E0'; titleClr = 'E65100'; accentClr = 'FF6F00'; bodyClr = '4E342E'; badgeBg = 'FFE0B2'; badgeText = 'E65100';
+    } else if (tp === '练习') {
+      bgClr = 'E8F5E9'; titleClr = '1B5E20'; accentClr = '2E7D32'; bodyClr = '2E7D32'; badgeBg = 'C8E6C9'; badgeText = '1B5E20';
+    } else if (tp === '小结') {
+      bgClr = 'F3E5F5'; titleClr = '4A148C'; accentClr = '7B1FA2'; bodyClr = '4A148C'; badgeBg = 'E1BEE7'; badgeText = '4A148C';
+    } else if (tp === '作业') {
+      bgClr = 'E3F2FD'; titleClr = '0D47A1'; accentClr = '1976D2'; bodyClr = '1565C0'; badgeBg = 'BBDEFB'; badgeText = '0D47A1';
+    }
     const caption: string = I18n.t('cw.pageOf')
-      .replace('{i}', index.toString()).replace('{t}', total.toString()) +
-      (slide.type !== '' ? '  ·  ' + slide.type : '');
-    // 标题
+      .replace('{i}', index.toString()).replace('{t}', total.toString());
     const title: string = slide.title !== '' ? slide.title : I18n.t('cw.page').replace('{n}', index.toString());
-    // 要点与底部配图方向
     const pts: string[] = slide.points.length > 0 ? slide.points.slice(0, 8) : [I18n.t('cw.noPointsDraft')];
     const visual: string = slide.visual !== '' ? I18n.t('cw.visual') + slide.visual : '';
     const shapes: string[] = [];
-    shapes.push(PptxExporter.shapeXml(2, left, 182880, contentW, 228600, [caption], false, 1200, '7F7F7F', false));
-    shapes.push(PptxExporter.shapeXml(3, left, 457200, contentW, 900000, [title], true, 3000, '000000', false));
-    shapes.push(PptxExporter.shapeXml(4, left, 1463040, contentW, 4480560, pts, false, 2000, '000000', true));
+    shapes.push(PptxExporter.rectXml(2, 0, 0, W, 55000, accentClr));
+    if (slide.type !== '') {
+      shapes.push(PptxExporter.badgeXml(3, left, 182880, slide.type, badgeBg, badgeText, 1200));
+    }
+    const captionX: number = slide.type !== '' ? left + 380000 : left;
+    shapes.push(PptxExporter.shapeXml(4, captionX, 182880, contentW - 380000, 228600, [caption], false, 1200, '7F7F7F', false, ''));
+    shapes.push(PptxExporter.shapeXml(5, left, 480060, contentW, 900000, [title], true, 3000, titleClr, false, ''));
+    shapes.push(PptxExporter.shapeXml(6, left, 1463040, contentW, 4480560, pts, false, 2000, bodyClr, true, ''));
     if (visual !== '') {
-      shapes.push(PptxExporter.shapeXml(5, left, 6020000, contentW, 500000, [visual], false, 1400, '595959', false));
+      shapes.push(PptxExporter.shapeXml(7, left, 6020000, contentW, 500000, [visual], false, 1400, '595959', false, ''));
     }
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
       'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
       'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">' +
-      '<p:cSld name="Slide ' + index + '"><p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/>' +
+      '<p:cSld name="Slide ' + index + '"><p:bg><p:bgPr><a:solidFill><a:srgbClr val="' + bgClr + '"/>' +
       '</a:solidFill></p:bgPr></p:bg><p:spTree>' +
-      '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
+      '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvSpPr/><p:nvPr/></p:nvGrpSpPr>' +
       '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>' +
       '<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' +
       shapes.join('') + '</p:spTree></p:cSld>' +

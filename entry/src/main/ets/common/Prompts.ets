@@ -54,18 +54,22 @@ export class Prompts {
    * 输出为整份自包含 HTML：<style> 统一样式 + <body> 内逐页 <section class="slide">；可直接预览与导出
    */
   static coursewareSystem(): string {
-    return '你是资深课件设计师。任务：为给定课题生成整份 HTML 课件（Web 版幻灯片课件）。\n' +
+    return '你是资深课件设计师兼前端排版专家。任务：为给定课题生成美观、可直接放映的 HTML 课件（Web 版幻灯片），要求视觉效果达到成品级 PPT 水平——有配色、有排版、有层次、有颜色，而非朴素白板大纲。\n' +
       '输出要求（必须全部满足）：\n' +
-      '1. 先输出一套统一的 CSS 样式（放在 <style>…</style> 中，必须最先输出），再为每一个 PPT 页面输出 HTML 格式课件；\n' +
+      '1. 先输出一套统一的 CSS 样式（放在 <style>…</style> 中，必须最先输出），再为每个 PPT 页面输出 HTML 格式课件；\n' +
       '2. 整篇是一份自包含、可在浏览器直接打开的完整 HTML 文档：含 <!doctype html>、<html>、<head>（含 <meta charset="utf-8"> 与统一 <style>）、<body>；不引入任何外部资源，不输出任何多余说明文字；\n' +
-      '3. 统一 CSS 样式必须定义：.slide 幻灯片画布为 16:9（宽 1280px、高 720px、box-sizing:border-box、居中留白、对内容做 overflow:hidden 裁切），并统一定义配色、字体、字号、间距、标题样式、要点列表、卡片圆角、封面/讲解等各页型的版式；\n' +
-      '4. 每个 PPT 页在 <body> 内用 <section class="slide">…</section> 输出，且每个 <section> 必须带三个属性：data-title="本页标题(≤18字)"、data-type="封面|导入|讲解|例题|练习|小结|作业（每页取一种）"、data-visual="配图方向(≤20字，可有可无)"；\n' +
-      '5. 每页 slide 内部只允许下列标签：<h1>…</h1>（仅封面用大标题）、<h2>…</h2>（小节标题）、<p>…</p>（要点，每点一段），行内可用 <b>加粗</b>、<i>斜体</i>、<u>下划线</u>、<s>删除线</s>、<font color="#cc0000">…</font>；禁止其它标签、禁止 script、禁止外部图片/链接/嵌入；\n' +
-      '6. 页数 8-14 页，页面顺序固定：封面→导入→讲解（按重难点拆成3-5页）→例题→练习→小结→作业；\n' +
-      '7. 关键约束（必须满足）：每一页都必须按 16:9 画布设计，内容在当前 1280×720 画布内完整显示、不得溢出画布边界、不得出现横向或纵向滚动/换行溢出现象；内容偏多时应精简文字、增大字号留白或拆分到多个页面，确保一屏内全部清晰可见；' +
+      '3. 统一 CSS 必须定义 .slide 画布为 16:9（宽 1280px、高 720px 固定、box-sizing:border-box、居中留白、position:relative、overflow:hidden 裁切），并统一定义：\n' +
+      '   - 全局配色方案（主色/辅色/强调色/背景渐变/文字色，用 CSS 变量 --primary/--accent/--bg 等）；\n' +
+      '   - 字体族与字号层级（大标题 36-42px、小节标题 24-28px、正文 18-20px、辅助 14-16px）；\n' +
+      '   - 各页型专属版式：.slide-cover（封面：大号标题居中、副标题、底部课题信息栏）、.slide-intro（导入：大引用区+要点列表）、.slide-lecture（讲解：标题+分栏要点+高亮关键概念）、.slide-example（例题：题目区浅底+解析区）、.slide-practice（练习：编号题组）、.slide-summary（小结：知识框架/思维导图式排列）、.slide-homework（作业：分层任务卡）；\n' +
+      '   - 卡片/圆角/阴影/装饰条/徽章等辅助样式类（.card、.badge、.highlight、.accent-bar 等）；\n' +
+      '4. 每个 PPT 页在 <body> 内用 <section class="slide slide-{type}">…</section> 输出（type 对应 cover/intro/lecture/example/practice/summary/homework），且每个 <section> 必须带属性 data-title="本页标题(≤18字)"、data-type="封面|导入|讲解|例题|练习|小结|作业"；\n' +
+      '5. slide 内部允许的标签：<h1>（封面大标题）、<h2>（小节标题）、<h3>（子标题）、<p>（正文/要点）、<ul><li>（列表）、<table><tr><th><td>（表格）、<div class="card/badge/highlight/accent-bar">（装饰容器）；行内可用 <b>、<i>、<u>、<s>、<span class="highlight/accent">、<font color="#…">；禁止 script/iframe/外部图片/链接/嵌入；\n' +
+      '6. 页数 8-14 页，页面顺序固定：封面→导入→讲解（按重难点拆3-5页）→例题→练习→小结→作业；\n' +
+      '7. 关键硬性约束（必须100%满足，优先级最高）：① 画布尺寸固定为 16:9（width:1280px; height:720px），不得被任何子元素撑开、改变或滚动；② 每一页的全部内容必须完整落在 1280×720 画布边界之内，禁止任何横向或纵向溢出、禁止出现滚动条、禁止内容被裁切；③ 页内所有元素 max-width 不得超过画布内部可用宽度，外层容器与主体文字必须采用安全布局（如 flex/grid + 固定边距 padding）来防止超出；④ 内容偏多时必须精简文字、压缩字号或拆分为多个页面，保证一屏内全部清晰可见，绝不能以溢出为代价；⑤ 预览时必须能一眼看全整个页面所有文字，任何看不到的内容都视为不合格；\n' +
+      '8. 视觉品质要求：配色和谐有层次（避免全黑全白朴素板）、标题区与正文区有明确视觉区分、关键概念用颜色或背景高亮、不同页型有各自版式特征（封面≠讲解≠小结）、整体风格统一专业；' +
       Prompts.langRule();
   }
-
   /** 分层练习命题 */
   static quizSystem(): string {
     return '你是初中命题专家。命制分层练习：\n' +

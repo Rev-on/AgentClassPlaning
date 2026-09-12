@@ -9,6 +9,7 @@ import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { DocxExporter } from '../common/DocxExporter';
+import { PptxExporter, CourseSlide } from '../common/PptxExporter';
 import { PageHeader } from '../common/components/PageHeader';
 import { RichBox } from '../common/components/RichBox';
 import { RichHtml } from '../common/RichHtml';
@@ -45,15 +46,37 @@ struct HistoryDetailDialog {
     });
   }
 
+  /** 检测内容是否为课件 HTML（含 <section class="slide">） */
+  private isCourseware(): boolean {
+    return this.content.indexOf('<section class="slide"') >= 0 ||
+      this.content.indexOf('<section class="slide ') >= 0;
+  }
+
+  /** 解析课件幻灯片（失败返回空数组） */
+  private coursewareSlides(): CourseSlide[] {
+    const s: CourseSlide[] | null = PptxExporter.parseHtmlCourseware(this.content);
+    if (s !== null && s.length > 0) {
+      return s;
+    }
+    const empty: CourseSlide[] = [];
+    return empty;
+  }
+
   private exportContent(): void {
     if (this.content === '') {
       return;
     }
     const ctx = getContext(this) as common.UIAbilityContext;
     const safeTitle: string = this.title === '' ? 'History' : this.title;
-    DocxExporter.exportDocx(ctx, this.content, safeTitle + '.docx').catch((err: Error) => {
-      promptAction.showToast({ message: I18n.t('err.exportFail') + err.message });
-    });
+    if (this.isCourseware()) {
+      PptxExporter.exportPptx(ctx, this.content, safeTitle + '.pptx').catch((err: Error) => {
+        promptAction.showToast({ message: I18n.t('err.exportFail') + err.message });
+      });
+    } else {
+      DocxExporter.exportDocx(ctx, this.content, safeTitle + '.docx').catch((err: Error) => {
+        promptAction.showToast({ message: I18n.t('err.exportFail') + err.message });
+      });
+    }
   }
 
   build() {
@@ -70,6 +93,75 @@ struct HistoryDetailDialog {
             .fontFamily(AppFonts.family())
             .fontSize(14)
             .fontColor(this.col('hint'))
+        } else if (this.isCourseware()) {
+          // 课件：按 16:9 幻灯片卡片预览
+          Column({ space: 12 }) {
+            ForEach(this.coursewareSlides(), (s: CourseSlide, index: number) => {
+              Column({ space: 5 }) {
+                Row({ space: 8 }) {
+                  if (s.type !== '') {
+                    Text(s.type)
+                      .fontFamily(AppFonts.family())
+                      .fontSize(10)
+                      .fontColor('#2B4C7E')
+                      .backgroundColor('#E8F1FB')
+                      .borderRadius(6)
+                      .padding({ left: 7, right: 7, top: 2, bottom: 2 })
+                  }
+                  Blank()
+                  Text((index + 1) + ' / ' + this.coursewareSlides().length)
+                    .fontFamily(AppFonts.family())
+                    .fontSize(11)
+                    .fontColor('#9AA0A6')
+                }
+                .width('100%')
+                Text(s.title !== '' ? s.title : I18n.t('cw.page').replace('{n}', (index + 1).toString()))
+                  .fontFamily(AppFonts.family())
+                  .fontSize(17)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(this.col('title'))
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .width('100%')
+                  .padding({ top: 2, bottom: 2 })
+                Divider().color(this.resolvedTheme === 'dark' ? '#333C4A' : '#EDF0F4')
+                if (s.points.length > 0) {
+                  ForEach(s.points.slice(0, 5), (pt: string) => {
+                    Row() {
+                      Text('•  ')
+                        .fontFamily(AppFonts.family())
+                        .fontSize(13)
+                        .fontColor(this.col('text'))
+                      Text(pt)
+                        .fontFamily(AppFonts.family())
+                        .fontSize(13)
+                        .fontColor(this.col('text'))
+                        .lineHeight(18)
+                        .maxLines(2)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .layoutWeight(1)
+                    }
+                    .width('100%')
+                    .alignItems(VerticalAlign.Top)
+                  }, (pt: string, pi: number) => s.page.toString() + '_' + pi.toString())
+                } else {
+                  Text(I18n.t('cw.noPoints'))
+                    .fontFamily(AppFonts.family())
+                    .fontSize(12)
+                    .fontColor('#9AA0A6')
+                    .width('100%')
+                }
+              }
+              .width('100%')
+              .aspectRatio(16 / 9)
+              .padding(12)
+              .backgroundColor(this.resolvedTheme === 'dark' ? '#1C222C' : '#FFFFFF')
+              .borderRadius(12)
+              .clip(true)
+              .alignItems(HorizontalAlign.Start)
+            }, (s: CourseSlide, index: number) => s.page.toString())
+          }
+          .width('100%')
         } else {
           RichBox({ html: this.content })
             .width('100%')
@@ -82,7 +174,7 @@ struct HistoryDetailDialog {
       .padding(10)
       .scrollBar(BarState.Auto)
       Row({ space: 10 }) {
-        Button(this.t('btn.exportWord'))
+        Button(this.isCourseware() ? this.t('btn.exportPptx') : this.t('btn.exportWord'))
           .fontFamily(AppFonts.family())
           .fontSize(14)
           .height(40)
