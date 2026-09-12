@@ -94,6 +94,8 @@ export struct ResultPanel {
   slideMode: boolean = false;
   /** 是否允许进入编辑态：false 时隐藏编辑按钮并禁用编辑（课件页等以成品预览为主的场景） */
   editable: boolean = true;
+  /** 是否显示复制按钮：false 时隐藏（课件页等以导出为主的场景） */
+  showCopy: boolean = true;
   /**
    * 整页滚动模式：预览内容自然撑高（不内嵌独立滚动），由外层页面级 Scroll 统一滚动。
    * 用于"生成完毕后整个功能页下滑、完整显示预览框与顶部操作按钮"的形态；
@@ -984,12 +986,14 @@ export struct ResultPanel {
             .onClick(() => this.openEditor())
         }
         Blank()
-        Button(this.t('btn.copy'))
-          .fontFamily(AppFonts.family())
-          .fontSize(13)
-          .height(30)
-          .backgroundColor('#4A90D9')
-          .onClick(() => this.copyText(this.result))
+        if (this.showCopy) {
+          Button(this.t('btn.copy'))
+            .fontFamily(AppFonts.family())
+            .fontSize(13)
+            .height(30)
+            .backgroundColor('#4A90D9')
+            .onClick(() => this.copyText(this.result))
+        }
         Button(this.exportLabel())
           .fontFamily(AppFonts.family())
           .fontSize(13)

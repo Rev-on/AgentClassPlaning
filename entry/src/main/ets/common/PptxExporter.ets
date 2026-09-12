@@ -316,6 +316,34 @@ export class PptxExporter {
 
   /** 导出课件为 .pptx 粗稿（兼容 AI 直出 OOXML 片段、HTML 课件、旧 JSON 大纲三种形态；选择保存位置） */
   static async exportPptx(context: common.UIAbilityContext, json: string, fileName: string): Promise<void> {
+    const buffer: ArrayBuffer = await PptxExporter.buildPptxBuffer(context, json);
+    const savePicker = new picker.DocumentViewPicker(context);
+    const saveOptions = new picker.DocumentSaveOptions();
+    saveOptions.newFileNames = [fileName];
+    // ArkUI-X 跨端：不设置 fileSuffixChoices（Android 侧不支持，后缀由系统按文件名扩展名处理）
+    const saveResult = await savePicker.save(saveOptions);
+    if (saveResult.length === 0) {
+      return;
+    }
+    const uri: string = saveResult[0];
+    const file = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+    fs.writeSync(file.fd, buffer);
+    fs.closeSync(file);
+    promptAction.showToast({ message: I18n.t('toast.exportedTo') + fileName });
+  }
+
+  /** 导出课件 .pptx 到应用沙箱 filesDir（供 ShareKit 系统分享面板读取），返回文件路径 */
+  static async exportPptxToFile(context: common.UIAbilityContext, json: string, fileName: string): Promise<string> {
+    const buffer: ArrayBuffer = await PptxExporter.buildPptxBuffer(context, json);
+    const path: string = context.filesDir + '/share_' + Date.now() + '_' + fileName;
+    const file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+    fs.writeSync(file.fd, buffer);
+    fs.closeSync(file);
+    return path;
+  }
+
+  /** 组装 .pptx 包字节（兼容 OOXML 片段/HTML 课件/JSON 大纲三种形态，基于内置模板逐页注入） */
+  private static async buildPptxBuffer(context: common.UIAbilityContext, json: string): Promise<ArrayBuffer> {
     let slides: CourseSlide[] | null = PptxExporter.parseOoxmlFragments(json);
     if (slides === null || slides.length === 0) {
       slides = PptxExporter.parseHtmlCourseware(json);
@@ -387,24 +415,11 @@ export class PptxExporter {
       pres = pres.substring(0, si + startTag.length) + inner + pres.substring(ei);
     }
     zip.file(presName, pres);
-    // 6. 打包并保存
-    const buffer: ArrayBuffer = (await zip.generateAsync({
+    // 6. 打包
+    return (await zip.generateAsync({
       type: 'arraybuffer',
       compression: 'DEFLATE'
     })) as ArrayBuffer;
-    const savePicker = new picker.DocumentViewPicker(context);
-    const saveOptions = new picker.DocumentSaveOptions();
-    saveOptions.newFileNames = [fileName];
-    // ArkUI-X 跨端：不设置 fileSuffixChoices（Android 侧不支持，后缀由系统按文件名扩展名处理）
-    const saveResult = await savePicker.save(saveOptions);
-    if (saveResult.length === 0) {
-      return;
-    }
-    const uri: string = saveResult[0];
-    const file = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-    fs.writeSync(file.fd, buffer);
-    fs.closeSync(file);
-    promptAction.showToast({ message: I18n.t('toast.exportedTo') + fileName });
   }
 
   // ============ 幻灯片部件 XML ============

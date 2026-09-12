@@ -26,6 +26,16 @@ export class AppSettings {
   private static readonly KEY_FONT_SCALE: string = 'fontScale';
   /** 深度思考开关（启用后生成走思考模式，思考过程实时展示；默认关闭＝快速模式） */
   static readonly KEY_THINK: string = 'deepThink';
+  /** 任教科目（如 物理）/UserSubject */
+  static readonly KEY_TEACH_SUBJECT: string = 'teachSubject';
+  /** 任教年级（1-9；九年一贯，小学 1-6、初中 7-9） */
+  static readonly KEY_TEACH_GRADE: string = 'teachGrade';
+  /** 起始册次基准：用户设定的"某年级某学期"作为推算起点，格式 YYYY-MM（学年起始月） */
+  static readonly KEY_TEACH_ANCHOR: string = 'teachAnchor';
+  /** 学生基础水平：strong=基础强 / normal=均衡 / weak=基础弱 */
+  static readonly KEY_TEACH_LEVEL: string = 'teachLevel';
+  /** Agent 记录的上次已生成课题（用于目录自动推进下一课） */
+  static readonly KEY_TEACH_LAST_TOPIC: string = 'teachLastTopic';
 
   /** 字号档位倍率（对应设置页：小 / 标准 / 大 / 特大） */
   static readonly FONT_PRESETS: number[] = [0.9, 1.0, 1.15, 1.3];
@@ -73,6 +83,99 @@ export class AppSettings {
     AppStorage.setOrCreate(AppSettings.KEY_THINK, think);
     AppSettings.applyColorMode(context, theme);
     AppSettings.applyFontScale(context, fontScale);
+    await AppSettings.loadTeach(context);
+  }
+
+  /** 任教信息存取：默认物理/八年级/基础均衡；anchor 为空时按"当前学年学期"推算册次 */
+  private static async loadTeach(context: common.UIAbilityContext): Promise<void> {
+    let subject: string = '物理';
+    let grade: number = 8;
+    let level: string = 'normal';
+    let anchor: string = '';
+    let lastTopic: string = '';
+    try {
+      const store = await preferences.getPreferences(context, AppSettings.STORE);
+      const sv = await store.get(AppSettings.KEY_TEACH_SUBJECT, '物理');
+      const gv = await store.get(AppSettings.KEY_TEACH_GRADE, 8);
+      const lv = await store.get(AppSettings.KEY_TEACH_LEVEL, 'normal');
+      const av = await store.get(AppSettings.KEY_TEACH_ANCHOR, '');
+      const tv = await store.get(AppSettings.KEY_TEACH_LAST_TOPIC, '');
+      if (sv !== null && String(sv) !== '') {
+        subject = String(sv);
+      }
+      const gNum: number = Number(gv);
+      if (gNum >= 1 && gNum <= 9) {
+        grade = gNum;
+      }
+      if (String(lv) === 'strong' || String(lv) === 'normal' || String(lv) === 'weak') {
+        level = String(lv);
+      }
+      if (av !== null) {
+        anchor = String(av);
+      }
+      if (tv !== null) {
+        lastTopic = String(tv);
+      }
+    } catch (e) {
+      // 使用默认值
+    }
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_SUBJECT, subject);
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_GRADE, grade);
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_LEVEL, level);
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_ANCHOR, anchor);
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_LAST_TOPIC, lastTopic);
+  }
+
+  /** 保存任教科目并立即生效 */
+  static async saveTeachSubject(context: common.UIAbilityContext, subject: string): Promise<void> {
+    const store = await preferences.getPreferences(context, AppSettings.STORE);
+    await store.put(AppSettings.KEY_TEACH_SUBJECT, subject);
+    await store.flush();
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_SUBJECT, subject);
+  }
+
+  /** 保存任教年级（1-9）并立即生效；同时把当前册次重置为新年级上册 */
+  static async saveTeachGrade(context: common.UIAbilityContext, grade: number): Promise<void> {
+    const store = await preferences.getPreferences(context, AppSettings.STORE);
+    await store.put(AppSettings.KEY_TEACH_GRADE, grade);
+    await store.put(AppSettings.KEY_TEACH_ANCHOR, '');
+    await store.flush();
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_GRADE, grade);
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_ANCHOR, '');
+  }
+
+  /** 保存学生基础水平（strong/normal/weak）并立即生效 */
+  static async saveTeachLevel(context: common.UIAbilityContext, level: string): Promise<void> {
+    const store = await preferences.getPreferences(context, AppSettings.STORE);
+    await store.put(AppSettings.KEY_TEACH_LEVEL, level);
+    await store.flush();
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_LEVEL, level);
+  }
+
+  /**
+   * 保存"起始基准"并立即生效：以打印"起始学年·起始年级"为推算起点，
+   * 后续年级/册次由 TeachingProfile 随学季自动推进。格式 YYYY-GRADE（如 2026-7）。
+   */
+  static async saveTeachAnchor(context: common.UIAbilityContext, year: number, grade: number): Promise<void> {
+    const anchor: string = year + '-' + grade;
+    const store = await preferences.getPreferences(context, AppSettings.STORE);
+    await store.put(AppSettings.KEY_TEACH_ANCHOR, anchor);
+    await store.put(AppSettings.KEY_TEACH_GRADE, grade);
+    await store.flush();
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_ANCHOR, anchor);
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_GRADE, grade);
+  }
+
+  /** 保存 Agent 上次生成的课题（目录自动推进下一课用） */
+  static async saveTeachLastTopic(context: common.UIAbilityContext, topic: string): Promise<void> {
+    try {
+      const store = await preferences.getPreferences(context, AppSettings.STORE);
+      await store.put(AppSettings.KEY_TEACH_LAST_TOPIC, topic);
+      await store.flush();
+    } catch (e) {
+      // 非关键
+    }
+    AppStorage.setOrCreate(AppSettings.KEY_TEACH_LAST_TOPIC, topic);
   }
 
   /** 读取"已同意免责声明"标记（默认 false） */

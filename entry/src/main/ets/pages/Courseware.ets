@@ -440,6 +440,7 @@ export struct CoursewareContent {
                 slideMode: true,
                 scrollPage: true,
                 editable: false,
+                showCopy: false,
                 onSave: () => this.saveToHistory(),
                 onEdited: (t: string): void => {
                   if (t.trim() === '') {

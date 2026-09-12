@@ -8,6 +8,7 @@ import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { PlanContent } from './Plan';
+import { AgentContent } from './Agent';
 import { CoursewareContent } from './Courseware';
 import { QuizContent } from './Quiz';
 import { ResearchContent } from './Research';
@@ -63,6 +64,9 @@ export struct IndexWide {
 
   /** 卡片图标底色（与手机首页卡片一致） */
   private iconBg(id: string): string {
+    if (id === 'agent') {
+      return '#FDEFF0';
+    }
     if (id === 'courseware') {
       return '#FFF4E5';
     }
@@ -119,6 +123,7 @@ export struct IndexWide {
     return {
       tabKey: 'tab.assistant',
       entries: [
+        { id: 'agent', icon: '助', labelKey: 'card.agent', descKey: 'card.agent.desc' },
         { id: 'plan', icon: '教', labelKey: 'card.plan', descKey: 'card.plan.desc' },
         { id: 'courseware', icon: '课', labelKey: 'card.courseware', descKey: 'card.courseware.desc' },
         { id: 'quiz', icon: '题', labelKey: 'card.quiz', descKey: 'card.quiz.desc' },
@@ -197,7 +202,9 @@ export struct IndexWide {
   /** 右栏内容：按当前选中项渲染对应功能页面组件 */
   @Builder
   renderContent() {
-    if (this.selId === 'plan') {
+    if (this.selId === 'agent') {
+      AgentContent()
+    } else if (this.selId === 'plan') {
       PlanContent()
     } else if (this.selId === 'courseware') {
       CoursewareContent()

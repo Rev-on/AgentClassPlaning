@@ -37,21 +37,8 @@ export class DocxExporter {
 
   /** 主入口：导出内容为 .docx（弹出保存位置选择）。富文本 HTML 走样式转换；遗留 Markdown 走原解析 */
   static async exportDocx(context: common.UIAbilityContext, content: string, fileName: string): Promise<void> {
-    // 1. 内容 → document.xml
-    const documentXml: string = DocxExporter.isHtmlDoc(content) ?
-      DocxExporter.buildHtmlDocumentXml(content) :
-      DocxExporter.buildDocumentXml(content);
-    // 2. 组装 docx 包
-    const zip = new JSZip();
-    zip.file('[Content_Types].xml', DocxExporter.contentTypesXml());
-    zip.file('_rels/.rels', DocxExporter.relsXml());
-    zip.folder('word');
-    zip.file('word/document.xml', documentXml);
-    const buffer: ArrayBuffer = (await zip.generateAsync({
-      type: 'arraybuffer',
-      compression: 'DEFLATE'
-    })) as ArrayBuffer;
-    // 3. 选择保存位置并写入
+    const buffer: ArrayBuffer = await DocxExporter.buildDocxBuffer(content);
+    // 选择保存位置并写入
     const savePicker = new picker.DocumentViewPicker(context);
     const saveOptions = new picker.DocumentSaveOptions();
     saveOptions.newFileNames = [fileName];
@@ -65,6 +52,32 @@ export class DocxExporter {
     fs.writeSync(file.fd, buffer);
     fs.closeSync(file);
     promptAction.showToast({ message: I18n.t('toast.exportedTo') + fileName });
+  }
+
+  /** 组装 .docx 包字节（富文本 HTML → 样式转换；遗留 Markdown → 原解析） */
+  private static async buildDocxBuffer(content: string): Promise<ArrayBuffer> {
+    const documentXml: string = DocxExporter.isHtmlDoc(content) ?
+      DocxExporter.buildHtmlDocumentXml(content) :
+      DocxExporter.buildDocumentXml(content);
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', DocxExporter.contentTypesXml());
+    zip.file('_rels/.rels', DocxExporter.relsXml());
+    zip.folder('word');
+    zip.file('word/document.xml', documentXml);
+    return (await zip.generateAsync({
+      type: 'arraybuffer',
+      compression: 'DEFLATE'
+    })) as ArrayBuffer;
+  }
+
+  /** 导出 .docx 到应用沙箱 filesDir（供 ShareKit 系统分享面板直接读取），返回文件路径 */
+  static async exportDocxToFile(context: common.UIAbilityContext, content: string, fileName: string): Promise<string> {
+    const buffer: ArrayBuffer = await DocxExporter.buildDocxBuffer(content);
+    const path: string = context.filesDir + '/share_' + Date.now() + '_' + fileName;
+    const file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+    fs.writeSync(file.fd, buffer);
+    fs.closeSync(file);
+    return path;
   }
 
   /** 导出文本为 .json 文件：剥离 ```json 围栏与前后杂文，仅保留 JSON；合法则格式化缩进 */

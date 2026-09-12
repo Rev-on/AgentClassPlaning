@@ -15,6 +15,7 @@ import { ResultBus } from '../common/ResultBus';
 import { HistoryStore } from '../common/HistoryStore';
 import { ResultPanel } from '../common/components/ResultPanel';
 import { PlanContent } from './Plan';
+import { AgentContent } from './Agent';
 import { CoursewareContent } from './Courseware';
 import { QuizContent } from './Quiz';
 import { ResearchContent } from './Research';
@@ -277,6 +278,9 @@ export struct IndexWideDuo {
 
   /** 卡片图标底色（与手机首页卡片一致） */
   private iconBg(id: string): string {
+    if (id === 'agent') {
+      return '#FDEFF0';
+    }
     if (id === 'courseware') {
       return '#FFF4E5';
     }
@@ -333,6 +337,7 @@ export struct IndexWideDuo {
     return {
       tabKey: 'tab.assistant',
       entries: [
+        { id: 'agent', icon: '助', labelKey: 'card.agent', descKey: 'card.agent.desc' },
         { id: 'plan', icon: '教', labelKey: 'card.plan', descKey: 'card.plan.desc' },
         { id: 'courseware', icon: '课', labelKey: 'card.courseware', descKey: 'card.courseware.desc' },
         { id: 'quiz', icon: '题', labelKey: 'card.quiz', descKey: 'card.quiz.desc' },
@@ -411,7 +416,9 @@ export struct IndexWideDuo {
   /** 右栏内容（2in1 专用）：AI 工具以 bottomResult=true 渲染，结果由下半屏承接 */
   @Builder
   renderContent() {
-    if (this.selId === 'plan') {
+    if (this.selId === 'agent') {
+      AgentContent()
+    } else if (this.selId === 'plan') {
       PlanContent({ bottomResult: true })
     } else if (this.selId === 'courseware') {
       CoursewareContent({ bottomResult: true })
