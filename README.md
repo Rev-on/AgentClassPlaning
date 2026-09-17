@@ -1,155 +1,25 @@
-# Rev TechingMaster
+# Rev TechingMaster 初中教学备课智能体
 
-面向初中教师的鸿蒙原生教学备课智能体（同步产出安卓版 APK 与 Windows 桌面版），将教案撰写、课件大纲、分层练习、学情分析、排座位、家校沟通等日常事务集成到一个应用中，由 AI 协助完成初稿，教师改动后使用。
+面向初中教师的 AI 教学助手，2026 年无锡市“人工智能 + 教育”创新应用技能大赛参赛作品。AI 生成初稿、教师修改使用，把教案、课件、练习、学情、排座、家校沟通等日常事务集成到一个应用。
 
-本项目为 2026 年无锡市“人工智能 + 教育”创新应用技能大赛参赛作品（智能体开发方向），使用 HarmonyOS 原生 ArkTS 开发，Windows 桌面版基于 Electron 复刻，核心代码遵循 AGPL-3.0 协议开源。
+## 核心功能
 
-## 功能特性
-
-应用采用三个底部页签组织功能：备课助手、家校沟通、我的。
-
-| 模块 | 功能 | 说明 |
-| --- | --- | --- |
-| 教案 | AI 生成教学设计 | 支持学科、年级、课题、课型及备注输入，备注会随请求传给 AI |
-| 课件大纲 | AI 生成逐页 PPT 大纲 | 输出结构化 JSON（豁免 AI 尾注，保证可直接解析） |
-| 分层练习 | AI 生成分层练习 | 覆盖不同能力层级的学生 |
-| 教研科研 | AI 辅助教研写作 | 页面底部带学术诚信警示水印 |
-| 学情分析 | AI 分析班级学情 | 支持 Excel 数据粘贴与文件导入 |
-| 排座位 | 智能排座 | 按身高贪心蛇形算法排座、点击互换、左右护法位；可一键导入班级名单，也可把当前身高名单保存（合并更新）回班级 |
-| 沟通话术 | AI 生成家校沟通话术 | 面向家长沟通场景 |
-| 学情报告 | AI 生成学生报告 | 可导出为 Word |
-| 历史记录 | 查看历史生成 | 按模块分类保存，可重新查看、复制或导出 |
-| 班级管理 | 班级与名单管理 | 新建/重命名班级、Excel/Word 名单导入并自动解析学号/姓名/身高 |
-| 设置 | 语言与主题 | 五语言界面（中/英/维吾尔/藏/蒙古）；浅色/深色/跟随系统；开源仓库入口 |
-
-### 统一的责任提示机制
-
-所有 AI 生成内容都会在服务层统一追加标注“（AI生成，仅供参考）”，教案、研究报告、分层练习、沟通话术等全部生效，唯一例外是课件大纲的 JSON 输出。首次启动弹窗免责声明，5 秒倒计时后可“同意并继续”，“不同意”即退出；同意后本地记忆不再提示。
-
-### 少数民族语言适配
-
-中英之外内置维吾尔语、藏语、蒙古语三套完整界面词典（各 205 键），并随包携带对应字体（藏文乌金体、维吾尔 UKIJMejT、Noto Sans Mongolian）在启动时注册，界面文字不依赖设备系统字体；切换语言即时生效，缺词自动回退中文。
-
-### 数据本地优先
-
-班级名单、历史记录、设置项全部保存在手机本地，不上传任何云端；“我的”页面与班级详情页内置“数据在本地、不上云”水印。
-
-## 页面路由
-
-```
-pages/Splash        启动动画页（粒子汇聚 + 华为云支持品牌行）
-pages/Index         主界面（三页签）
-pages/Plan          教案
-pages/Courseware    课件大纲
-pages/Quiz          分层练习
-pages/Research      教研科研
-pages/Analysis      学情分析
-pages/Talk          沟通话术
-pages/Report        学情报告
-pages/Seats         排座位（班级名单联动）
-pages/ClassManager  班级管理
-pages/ClassDetail   班级详情
-pages/History       历史记录
-pages/Settings      设置
-```
+- **智能备课**：AI 生成教案、逐页课件大纲（结构化 JSON，可导出 PPT）、分层练习、教研文章。
+- **学情与班级**：Excel 导入成绩做学情分析并生成 Word 报告；班级名单管理；身高蛇形算法智能排座，支持点击互换。
+- **家校沟通**：AI 生成家长沟通话术。
+- **责任机制**：所有 AI 内容统一标注“（AI生成，仅供参考）”，首次启动 5 秒倒计时免责声明。
+- **多语言**：中、英、维吾尔、藏、蒙古五语言界面，内置对应少数民族字体，数据本地优先、不上云。
 
 ## 技术架构
 
-| 层面 | 选型 |
-| --- | --- |
-| 开发语言 | ArkTS（声明式 UI），Stage 模型 |
-| 系统版本 | HarmonyOS，targetSdk / compatibleSdkVersion 6.0.0(20) |
-| AI 接入 | 自建中转代理（`server/`）→ DeepSeek 开放接口（SSE 流式 + 轮询兜底），默认模型 deepseek-v4-flash |
-| 本地存储 | Preferences（设置、历史、班级名单、免责声明状态） |
-| 文档能力 | 自研 OOXML 导出（Word、PPT 骨架模板）、ExcelJS 读写（xlsx）、jszip 解析（docx） |
-| 多语言 | I18n 五词典（zh/en/ug/bo/mn）＋按语言切换的内置字体 |
-| 第三方依赖 | @archermind/exceljs、@ohos/jszip |
+鸿蒙原生 ArkTS（Stage 模型）开发，同步产出 Android（ArkUI-X）与 Windows（Electron）版本。AI 经自建 Node.js 中转代理（`server/`）访问 DeepSeek，SSE 流式输出并带轮询兜底，App 重启自动恢复未完成任务；API Key 只存服务端。支持自研 OOXML 导出 Word/PPT、ExcelJS 读写名单。
 
-AI 请求采用服务端 SSE 流式输出（客户端自研 `SseClient.ets` 处理；流程：提交任务 → 订阅 feed 接收 open/chunk/done 事件），失败时自动回退到任务轮询兜底（每 2 秒轮询一次、最多 450 次），App 被杀后重启会自动恢复未完成任务；对“HTTP 200 但内容异常 / 长度截断”给出明确错误提示。界面内置自研 Markdown 渲染组件，支持标题、列表、表格、代码块等块级语法。
+## 快速构建
 
-## 目录结构
-
-```
-Rev_Techingmaster/
-├── AppScope/                     # 应用级配置（图标、启动图等）
-├── entry/                        # 鸿蒙主模块
-│   └── src/main/
-│       ├── ets/
-│       │   ├── entryability/     # 应用入口 Ability
-│       │   ├── pages/            # 各功能页面
-│       │   └── common/           # AI 服务、流式客户端、会话总线、代理配置、字体、主题、五语言词典、存储、跨端适配
-│       └── resources/            # 资源与路由配置（rawfile/fonts 内置字体、rawfile/pptskel.pptx 课件骨架）
-├── server/                       # AI 中转代理（Node.js，密钥只存这里；含《AI 部署手册》）
-├── Windows/                      # Windows 桌面版（Electron 复刻，含打包脚本与安装包输出）
-├── docs/                         # 设计文档（实况窗 PROGRESS 接入方案图）
-├── fonts/                        # 少数民族字体源文件与《字体清单》
-├── keys/                         # 签名证书（请勿提交到公开仓库）
-├── oh-package.json5              # 工程与依赖声明
-├── build-profile.json5           # 构建与签名配置
-└── LICENSE                       # AGPL-3.0
-```
-
-核心逻辑集中在 `entry/src/main/ets/common/`：`AiService.ets`（请求 + 统一 AI 尾注）、`SseClient.ets`（自研 SSE 流式客户端，兼容 ArkUI-X 的 UTF-8 解码）、`GenTask.ets`（任务提交 / 轮询兜底 / 未完成恢复）、`GenSession.ets`（流式会话总线）、`PptxExporter.ets` 与 `pptskel.pptx`（课件 PPT 导出）、`Duo2in1.ets`（二合一 / 折叠屏跨端适配）、`ApiConfig.ets`（代理地址与共享令牌，无密钥明文）、`AppFonts.ets`（按语言选字体）、`I18n.ets` 与 `*Dict.ets`（五语言词典）、`ClassStore.ets`/`HistoryStore.ets`/`AcceptStore.ets`（本地数据）。
-
-## 环境与构建（HarmonyOS）
-
-1. 安装 DevEco Studio（含 HarmonyOS SDK 26）。
-2. 打开工程根目录，等待依赖同步完成（必要时执行 `ohpm install`）。
-3. 连接已开启开发者模式的 HarmonyOS 设备，选择 entry 运行；或命令行构建：
-
-```powershell
-$env:DEVECO_SDK_HOME='<DevEco Studio 安装目录>\sdk'
-& '<DevEco Studio 安装目录>\tools\node\node.exe' '<DevEco Studio 安装目录>\tools\hvigor\bin\hvigorw.js' --mode module -p module=entry@default -p product=default -p requiredDeviceType=phone assembleHap --analyze=normal --parallel
-```
-
-## 环境与构建（Android，基于 ArkUI-X）
-
-安卓构建在独立副本 `Desktop\RevTechingX_Android` 中进行（原鸿蒙工程不受影响），产物 `RevTechingMaster-Android.apk` 位于项目根目录。依赖：`D:\ArkUI-X`（ArkUI-X SDK 26）、`D:\ADB`（Android SDK）、已配置的 `ace` 工具链。
-
-```powershell
-cd C:\Users\laoyu\Desktop\RevTechingX_Android
-ace build apk      # 增量约 30 秒；产物在 .arkui-x\android\app\build\outputs\apk\release\
-```
-
-跨端适配说明：工程经 `ace modify` 转换；已移除鸿蒙专用的备份扩展；跳转改用 UIContext 路由（经 `Splash.ets` 验证，`router.replaceUrl` 跨平台不可用）；二合一 / 折叠屏的双窗口逻辑抽到 `Duo2in1.ets`（Android 侧为空实现）；AI 代理统一走 HTTPS（`https://rev-on.site:3000`）。图标与鸿蒙一致（由同一 background/foreground 合成）。
-
-## 环境与构建（Windows 桌面版，基于 Electron）
-
-桌面版基于 Electron 复刻鸿蒙端核心功能（AI 备课生成、Word/Excel/PPT 文档导出、五语言界面），工作目录 `Windows/`，界面代码在 `renderer/`（原生 HTML/JS + `i18n-data.js` 五语言词条）。
-
-```powershell
-cd Windows
-npm run dist      # 打包 NSIS 安装包（来源：Windows/package.json > scripts.dist，等价 npx electron-builder --win nsis）
-```
-
-产物为 `dist\RevTechingMaster-Setup-1.0.0.exe`（x64 NSIS 安装包）。说明：
-
-- 打包脚本设置国内镜像（`ELECTRON_MIRROR`、`ELECTRON_BUILDER_BINARIES_MIRROR` → npmmirror），见 `Windows/build-with-icon.ps1`。
-- 写入 exe 图标与版本资源需要管理员权限：使用 `Windows/以管理员身份打包.bat`（自动 UAC 提权）或在管理员 PowerShell 中运行 `build-with-icon.ps1`。
-- 打包前需存在 `Windows/build/icon.ico`（由 png-to-ico 生成）；开发调试运行 `npm start`（`electron .`）。
-
-## 环境与构建（Windows 桌面版，基于 Electron）
-
-桌面版基于 Electron 复刻鸿蒙端核心功能（AI 备课生成、Word/Excel/PPT 文档导出、五语言界面），工作目录 `Windows/`，界面代码在 `renderer/`（原生 HTML/JS + `i18n-data.js` 五语言词条）。
-
-```powershell
-cd Windows
-npm run dist      # 打包 NSIS 安装包（来源：Windows/package.json > scripts.dist，等价 npx electron-builder --win nsis）
-```
-
-产物为 `dist\RevTechingMaster-Setup-1.0.0.exe`（x64 NSIS 安装包）。说明：
-
-- 打包脚本设置国内镜像（`ELECTRON_MIRROR`、`ELECTRON_BUILDER_BINARIES_MIRROR` → npmmirror），见 `Windows/build-with-icon.ps1`。
-- 写入 exe 图标与版本资源需要管理员权限：使用 `Windows/以管理员身份打包.bat`（自动 UAC 提权）或在管理员 PowerShell 中运行 `build-with-icon.ps1`。
-- 打包前需存在 `Windows/build/icon.ico`（由 png-to-ico 生成）；开发调试运行 `npm start`（`electron .`）。
-
-## AI 服务配置与安全
-
-- DeepSeek API Key 只存在于 `server/.env` 的 `DEEPSEEK_API_KEY`，前端源码无任何密钥明文；部署与配置见 `server/AI部署手册.md`。
-- 前端请求地址统一在 `ApiConfig.ets` 配置：`PROXY_BASE_URL`（默认 `https://rev-on.site:3000/v1/chat/completions`）、`SERVER_BASE_URL`（默认 `https://rev-on.site:3000/api`）；代理 3000 端口仅支持 HTTPS，旧的 HTTP 地址会返回空响应（属正常现象）。
-- 可选防滥用：在服务器 `.env` 设置 `PROXY_TOKEN` 并同步到 `ApiConfig.PROXY_TOKEN`（当前两端均为空，保持一致即可正常访问）；推送功能已从前端移除，服务端以 `PUSH_ENABLED` 环境变量控制推送开关（默认关闭）。
-- 曾随早期安装包分发的直连密钥应已在 DeepSeek 开放平台重置；`keys/` 目录的签名证书勿提交公开仓库。
+- 鸿蒙：DevEco Studio 打开工程，`ohpm install` 后运行 entry。
+- Windows：`cd Windows && npm run dist` 产出 NSIS 安装包。
+- 服务端：配置见 `server/AI部署手册.md`，Docker Compose 一键部署。
 
 ## 开源许可
 
-本项目基于 GNU Affero General Public License v3.0 开源，完整条款见 [LICENSE](LICENSE) 与 <https://www.gnu.org/licenses/agpl-3.0.html>。
+基于 [AGPL-3.0](LICENSE) 开源。
