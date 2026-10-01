@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 启动屏（粒子版）：
  *  1) 读取主题对应的前景图（foreground/foreground1），采样像素并拆解为彩色粒子
  *  2) 启动时粒子自屏幕外随机飞入，缓动汇聚成中央图案（肉眼无感拼接）
@@ -138,7 +138,10 @@ struct Splash {
   /** 读取主题对应图片并构建粒子 */
   private startInit(): void {
     this.darkMode = (AppStorage.get<string>('appResolvedTheme') as string) === 'dark';
-    const res: Resource = this.darkMode ? $r('app.media.foreground') : $r('app.media.foreground1');
+    // 注意：不可使用 app.media.foreground —— AppScope 与 entry 同名资源会冲突，
+    // 实测构建后仅 AppScope（应用图标分层图）生效，entry 版被遮蔽导致粒子图错误。
+    // 故 splash 专用图使用独立资源名 splash_logo / splash_logo_light。
+    const res: Resource = this.darkMode ? $r('app.media.splash_logo') : $r('app.media.splash_logo_light');
     const ctx = getContext(this) as common.UIAbilityContext;
     ctx.resourceManager.getMediaContent(res).then((data: Uint8Array) => {
       const bytes: ArrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
@@ -367,7 +370,7 @@ struct Splash {
         Column()
           .layoutWeight(0.55)
           .width('100%')
-        Text('Rev TechingMaster')
+        Text('Agent备课')
           .fontFamily(AppFonts.family())
           .fontSize(this.subSize + 3)
           .fontWeight(FontWeight.Medium)

@@ -8,7 +8,7 @@ import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { AppSettings } from '../common/AppSettings';
-import { TextbookCatalog } from '../common/TextbookCatalog';
+
 import { PageHeader } from '../common/components/PageHeader';
 
 /** 开源仓库地址（GitCode），点击后经系统浏览器打开 */
@@ -26,14 +26,6 @@ export struct SettingsContent {
   /** 字号档位选中下标（0..3，对应 AppSettings.FONT_PRESETS） */
   @State selFontIdx: number = 1;
 
-  /** 任教信息（Agent 备课自动读取）：科目/年级/基础水平/起始基准 */
-  @StorageLink('teachSubject') teachSubject: string = '物理';
-  @StorageLink('teachGrade') teachGrade: number = 8;
-  @StorageLink('teachLevel') teachLevel: string = 'normal';
-  @StorageLink('teachAnchor') teachAnchor: string = '';
-  /** 起始基准拆分：起始学年 / 起始年级（用于设置 UI 的双下拉） */
-  @State teachYear: number = 2026;
-  @State teachAnchorGrade: number = 8;
 
   private t(key: string): string {
     void this.appLang;
@@ -49,7 +41,7 @@ export struct SettingsContent {
   aboutToAppear(): void {
     this.ensureFonts();
     this.selFontIdx = this.fontPresetIndex();
-    this.parseTeachAnchor();
+
   }
 
   private ensureFonts(): void {
@@ -202,93 +194,6 @@ export struct SettingsContent {
     const cur: number = this.fontScale > 0 ? this.fontScale : 1.0;
     const target: number = AppSettings.FONT_PRESETS[this.selFontIdx];
     return Math.round(base * (target / cur) * 100) / 100;
-  }
-
-  /** 解析起始基准：anchor="YYYY-GRADE"；无基准时以当前学年起始 + 已存年级为默认 */
-  private parseTeachAnchor(): void {
-    const now: Date = new Date();
-    const m: RegExpMatchArray | null = this.teachAnchor.match(/^(\d{4})-(\d{1,2})$/);
-    if (m !== null) {
-      this.teachYear = Number(m[1]);
-      this.teachAnchorGrade = Number(m[2]);
-    } else {
-      const y: number = now.getMonth() + 1 >= 9 ? now.getFullYear() : now.getFullYear() - 1;
-      this.teachYear = y;
-      this.teachAnchorGrade = this.teachGrade;
-    }
-  }
-
-  /** 起始学年下拉选项（覆盖近 8 个学年） */
-  private yearOptions(): SelectOption[] {
-    const opts: SelectOption[] = [];
-    const base: number = new Date().getFullYear() - 4;
-    for (let i = 0; i < 8; i++) {
-      opts.push({ value: (base + i) + I18n.t('teach.yearUnit') });
-    }
-    return opts;
-  }
-
-  /** 起始年级下拉选项（初中 7-9 年级） */
-  private gradeOptions(): SelectOption[] {
-    const opts: SelectOption[] = [];
-    for (let g = 7; g <= 9; g++) {
-      opts.push({ value: g + I18n.t('teach.gradeUnit') });
-    }
-    return opts;
-  }
-
-  /** 起始学年当前选中下标 */
-  private yearIndex(): number {
-    const base: number = new Date().getFullYear() - 4;
-    const idx: number = this.teachYear - base;
-    return idx >= 0 && idx < 8 ? idx : 0;
-  }
-
-  /** 起始年级当前选中下标 */
-  private gradeIndex(): number {
-    const idx: number = this.teachAnchorGrade - 7;
-    return idx >= 0 && idx <= 2 ? idx : 2;
-  }
-
-  /** 任教科目下拉（与教材目录 RAG 索引对齐） */
-  private subjectOptions(): SelectOption[] {
-    const subs: string[] = TextbookCatalog.subjects();
-    const opts: SelectOption[] = [];
-    for (let i = 0; i < subs.length; i++) {
-      opts.push({ value: subs[i] });
-    }
-    return opts;
-  }
-
-  /** 任教科目当前选中下标 */
-  private subjectIndex(): number {
-    const subs: string[] = TextbookCatalog.subjects();
-    const idx: number = subs.indexOf(this.teachSubject);
-    return idx >= 0 ? idx : 0;
-  }
-
-  /** 保存任教科目 */
-  private saveSubject(subject: string): void {
-    const ctx = getContext(this) as common.UIAbilityContext;
-    AppSettings.saveTeachSubject(ctx, subject).then(() => {
-      promptAction.showToast({ message: I18n.t('toast.teachSaved') });
-    });
-  }
-
-  /** 保存起始基准（学年·年级） */
-  private saveAnchor(): void {
-    const ctx = getContext(this) as common.UIAbilityContext;
-    AppSettings.saveTeachAnchor(ctx, this.teachYear, this.teachAnchorGrade).then(() => {
-      promptAction.showToast({ message: I18n.t('toast.teachSaved') });
-    });
-  }
-
-  /** 保存学生基础水平 */
-  private saveLevel(level: string): void {
-    const ctx = getContext(this) as common.UIAbilityContext;
-    AppSettings.saveTeachLevel(ctx, level).then(() => {
-      promptAction.showToast({ message: I18n.t('toast.teachSaved') });
-    });
   }
 
   /** 打开系统浏览器访问开源仓库，鼓励用户点亮 Star */
@@ -479,123 +384,6 @@ export struct SettingsContent {
           .borderRadius(14)
           .alignItems(HorizontalAlign.Start)
 
-          // 任教信息（Agent 备课自动读取；随学季自动推进）
-          Column({ space: 12 }) {
-            Column({ space: 4 }) {
-              Text(this.t('set.teach'))
-                .fontFamily(AppFonts.family())
-                .fontSize(15)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(this.col('title'))
-                .width('100%')
-              Text(this.t('update.teachAuto'))
-                .fontFamily(AppFonts.family())
-                .fontSize(11)
-                .fontColor(this.col('hint'))
-                .width('100%')
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-
-            // 任教科目
-            Row({ space: 10 }) {
-              Text(this.t('set.teachSubject'))
-                .fontFamily(AppFonts.family())
-                .fontSize(14)
-                .fontColor(this.col('title'))
-                .width(88)
-              Select(this.subjectOptions())
-                .selected(this.subjectIndex())
-                .value(this.teachSubject)
-                .fontColor(this.col('text'))
-                .selectedOptionFontColor('#4A90D9')
-                .layoutWeight(1)
-                .onSelect((index: number) => {
-                  const subs: string[] = TextbookCatalog.subjects();
-                  if (index >= 0 && index < subs.length) {
-                    this.teachSubject = subs[index];
-                    this.saveSubject(subs[index]);
-                  }
-                })
-            }
-            .width('100%')
-
-            // 起始基准：学年 · 年级
-            Column({ space: 8 }) {
-              Text(this.t('set.teachAnchor'))
-                .fontFamily(AppFonts.family())
-                .fontSize(14)
-                .fontColor(this.col('title'))
-                .width('100%')
-              Row({ space: 10 }) {
-                Select(this.yearOptions())
-                  .selected(this.yearIndex())
-                  .value(this.yearOptions()[this.yearIndex()].value as string)
-                  .fontColor(this.col('text'))
-                  .selectedOptionFontColor('#4A90D9')
-                  .layoutWeight(1)
-                  .onSelect((index: number) => {
-                    const base: number = new Date().getFullYear() - 4;
-                    this.teachYear = base + index;
-                    this.saveAnchor();
-                  })
-                Select(this.gradeOptions())
-                  .selected(this.gradeIndex())
-                  .value(this.gradeOptions()[this.gradeIndex()].value as string)
-                  .fontColor(this.col('text'))
-                  .selectedOptionFontColor('#4A90D9')
-                  .layoutWeight(1)
-                  .onSelect((index: number) => {
-                    this.teachAnchorGrade = 7 + index;
-                    this.saveAnchor();
-                  })
-              }
-              .width('100%')
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-
-            // 学生基础水平
-            Column({ space: 6 }) {
-              Text(this.t('set.teachLevel'))
-                .fontFamily(AppFonts.family())
-                .fontSize(14)
-                .fontColor(this.col('title'))
-                .width('100%')
-              Row({ space: 8 }) {
-                ForEach([['strong', this.t('teach.levelStrong')],
-                  ['normal', this.t('teach.levelNormal')],
-                  ['weak', this.t('teach.levelWeak')]], (lv: string[]) => {
-                  Button(lv[1])
-                    .fontFamily(AppFonts.family())
-                    .fontSize(13)
-                    .height(38)
-                    .layoutWeight(1)
-                    .backgroundColor(this.teachLevel === lv[0] ? '#4A90D9' : this.col('inputBg'))
-                    .fontColor(this.teachLevel === lv[0] ? '#FFFFFF' : this.col('text'))
-                    .onClick(() => {
-                      this.teachLevel = lv[0];
-                      this.saveLevel(lv[0]);
-                    })
-                }, (lv: string[]) => lv[0])
-              }
-              .width('100%')
-            }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-
-            Text(this.t('set.teachHint'))
-              .fontFamily(AppFonts.family())
-              .fontSize(12)
-              .fontColor(this.col('hint'))
-              .lineHeight(18)
-              .width('100%')
-          }
-          .width('100%')
-          .padding(16)
-          .backgroundColor(this.col('card'))
-          .borderRadius(14)
-          .alignItems(HorizontalAlign.Start)
 
           // 关于
           Column({ space: 8 }) {

@@ -600,13 +600,7 @@ struct Index {
             Grid() {
               GridItem() {
                 FunCard({
-                  icon: I18n.badge('助', 'card.agent'), title: this.t('card.agent'), desc: this.t('card.agent.desc'),
-                  bgColor: '#FDEFF0',
-                  onTap: () => router.pushUrl({ url: 'pages/Agent' })
-                })
-              }
-              GridItem() {
-                FunCard({
+
                   icon: I18n.badge('教', 'card.plan'), title: this.t('card.plan'), desc: this.t('card.plan.desc'),
                   bgColor: '#E8F1FB',
                   onTap: () => router.pushUrl({ url: 'pages/Plan' })
