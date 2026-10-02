@@ -5,8 +5,7 @@ import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
 import router from '@ohos.router';
 import { AiService } from '../common/AiService';
-import { GenSession, GenSessionState } from '../common/GenSession';
-import { PageDraft } from '../common/PageDraft';
+import { GenSession, GenSessionState } from '../common/GenSession';import { PageDraft } from '../common/PageDraft';
 import { Prompts } from '../common/Prompts';
 import { HistoryStore } from '../common/HistoryStore';
 import { I18n } from '../common/I18n';
@@ -22,6 +21,11 @@ import { AppSettings } from '../common/AppSettings';
 import { AttachFile } from '../common/AttachTypes';
 import { RichHtml } from '../common/RichHtml';
 import { SafeInsets } from '../common/SafeInsets';
+
+/** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出，不被固定标题栏压住 */
+const ResultTopPadding: number = 12;
+/** 生成中预览框的最小高度（vp）：保证刚进入生成态时预览框就有足够可视面积 */
+const LivePreviewMinHeight: number = 220;
 
 @Component
 export struct PlanContent {
@@ -40,6 +44,11 @@ export struct PlanContent {
   @State thinkExpanded: boolean = true;
   @State thinkRunning: boolean = false;
   @State result: string = '';
+  /**
+   * 生成中是否已把输入卡片收起（让预览框"扩大"占满可视区）。
+   * 首个正文字块到达后置 true：此时用户关注的是正在生成的正文而非输入项。
+   */
+  @State liveExpanded: boolean = false;
   /** 生成会话恢复（离开页面后重进仍显示生成中/结果） */
   private sessSub: number = -1;
   /** 实时预览滚动控制器（生成中自动滚到最底部） */
@@ -49,15 +58,41 @@ export struct PlanContent {
 
   /** 完成后整页滚动控制器（自动下滑到结果预览） */
   private doneScroll: Scroller = new Scroller();
-  /** 结果预览在整页滚动内容中的顶部偏移（用于完成后自动定位） */
+  /**
+   * 结果预览顶部在**滚动内容内**的偏移（用于完成后自动定位）。
+   *
+   * 注意：不能用 onAreaChange 的 globalPosition.y —— 那是屏幕绝对坐标，
+   * 而 scrollTo 的 yOffset 是相对滚动内容顶部的偏移，两者相差
+   * 「状态栏避让高度 + 固定标题栏高度」，直接用会导致定位偏上/偏下。
+   * 这里改为记录「结果面板顶部」与「滚动内容顶部」两个屏幕坐标，相减得到相对偏移。
+   */
   private resultTop: number = 0;
+  /** 滚动内容容器的屏幕 Y 坐标（onAreaChange 记录，用于把绝对值换算成相对偏移） */
+  private scrollContentTop: number = 0;
+  /** 结果面板的屏幕 Y 坐标（onAreaChange 记录） */
+  private resultAbsTop: number = 0;
 
-  /** 生成完成后自动下滑到结果预览顶部（输入卡片滑出视口，预览填充可见区域并保持可下滑查看剩余内容） */
+  /** 由两个屏幕绝对坐标求「结果面板在滚动内容内的相对偏移」 */
+  private computeResultOffset(): number {
+    const rel: number = this.resultAbsTop - this.scrollContentTop;
+    return rel > 0 ? rel : 0;
+  }
+
+  /**
+   * 生成完成后自动上滑到结果预览顶部，让预览顶部的操作按钮恰好露出。
+   * 比原来多减一个「顶部内边距」，避免按钮被固定标题栏压住。
+   */
   private autoShowResult(): void {
     if (this.result === '') {
       return;
     }
-    this.doneScroll.scrollTo({ xOffset: 0, yOffset: Math.max(0, this.resultTop), animation: { duration: 350 } });
+    const target: number = this.computeResultOffset();
+    this.resultTop = target;
+    this.doneScroll.scrollTo({
+      xOffset: 0,
+      yOffset: Math.max(0, target - ResultTopPadding),
+      animation: { duration: 350 }
+    });
   }
 
   aboutToAppear(): void {
@@ -149,6 +184,8 @@ export struct PlanContent {
     this.stopRequested = false;
     this.loading = true;
     this.result = '';
+    // 生成初期先保留输入卡片（便于用户核对课题信息）；正文开始输出后再收起并让预览框扩大
+    this.liveExpanded = false;
     // 深度思考：清空上一次的思考过程并展开（生成中实时滚动展示）
     this.thinkText = '';
     this.thinkExpanded = true;
@@ -163,6 +200,10 @@ export struct PlanContent {
           // 第一个正文字块到达＝思考阶段完成、正文开始输出：此刻折叠思考框（此前思考框展示思考全貌）
           this.thinkRunning = false;
           this.thinkExpanded = false;
+        }
+        // 正文开始输出：收起输入卡片，把可视区让给正在生成的预览框（"结果框扩大"）
+        if (!this.liveExpanded) {
+          this.liveExpanded = true;
         }
         this.result = partial;
         this.scrollLiveToBottom();
@@ -192,10 +233,15 @@ export struct PlanContent {
       this.loading = false;
       this.thinkRunning = false;
       // 生成结束（完成/失败/停止）：思考过程自动折叠，用户点击标题可展开查看
-          this.thinkExpanded = false;
-          // 生成完成后自动下滑定位到结果预览，仅留预览顶部操作按钮
-          setTimeout(() => this.autoShowResult(), 120);
-        }
+      this.thinkExpanded = false;
+      // 生成完成后自动上滑到结果预览顶部，让顶部操作按钮露出。
+      // 分两步：先等一帧让"生成态→完成态"的布局切换（预览框重建为整页滚动）完成，
+      // 再等一帧读取 onAreaChange 记录到的坐标，避免用旧坐标滚动导致定位偏差。
+      setTimeout((): void => {
+        this.liveExpanded = false;
+        setTimeout((): void => this.autoShowResult(), 60);
+      }, 120);
+    }
   }
 
   /** 生成中：预览框实时滚动到最底部（等一帧让新内容完成布局） */
@@ -341,17 +387,9 @@ export struct PlanContent {
       .enabled(!this.loading)
       .opacity(this.loading ? 0.6 : 1)
 
-      if (this.loading) {
-        // 生成中：按钮变为"停止生成"（点击即停，保留半截预览）
-        Button(this.t('act.stop'))
-          .fontFamily(AppFonts.family())
-          .width('100%')
-          .height(44)
-          .backgroundColor('#C0564F')
-          .onClick(() => {
-            this.stopGen();
-          })
-      } else if (this.result !== '') {
+      // 生成中的"停止生成"按钮已移到页面顶部标题栏下方的固定操作条，
+      // 避免因生成中收起输入卡片而随卡片一起消失（用户将无法中断生成）。
+      if (!this.loading && this.result !== '') {
         // 生成完成：主按钮切换为"重新生成"与"跳转至课件大纲生成"
         Row({ space: 10 }) {
           Button(this.t('act.regen'))
@@ -425,6 +463,8 @@ export struct PlanContent {
     }
     .width('100%')
     .layoutWeight(1)
+    // 生成中即使内容很短，预览框也保持足够可视高度（"结果框扩大"的观感基础）
+    .constraintSize({ minHeight: LivePreviewMinHeight })
     .backgroundColor(this.col('card'))
     .padding(16)
     .borderRadius(14)
@@ -436,14 +476,54 @@ export struct PlanContent {
       // 固定标题栏：整页滚动时标题栏保持不滚，并预留顶部安全区（状态栏/刘海避让）
       Column() {
         PageHeader({ title: this.t('page.plan') })
+        // 生成中：标题栏下方固定一条"停止生成"操作条。
+        // 之所以放在这里而不是跟随输入卡片：生成中会收起输入卡片把空间让给预览框，
+        // 若停止按钮仍留在卡片内就会随卡片一起消失，用户无法中断生成。
+        if (this.loading) {
+          Row() {
+            Button(this.t('act.stop'))
+              .fontFamily(AppFonts.family())
+              .fontSize(14)
+              .fontColor('#FFFFFF')
+              .height(34)
+              .backgroundColor('#C0564F')
+              .borderRadius(17)
+              .onClick(() => {
+                this.stopGen();
+              })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+          .padding({ left: 12, right: 12, bottom: 8 })
+        }
       }
       .width('100%')
       .padding({ top: this.topInset })
 
       if (this.loading) {
-        // 生成中：输入卡片固定不下滑（整页不随生成滚动），仅预览框内部滚动到底
+        // 生成中：整页固定不滚动，仅预览框内部滚动到底。
+        // 正文开始输出后收起输入卡片（liveExpanded），把可视区让给预览框 —— 即"结果框扩大"。
         Column({ space: 0 }) {
-          this.inputCard()
+          if (!this.liveExpanded) {
+            this.inputCard()
+          } else {
+            // 收起态：一行摘要 + 可再次展开，避免用户完全看不到自己填的课题
+            Row({ space: 8 }) {
+              Text(this.topic !== '' ? this.topic : this.t('def.topic'))
+                .fontFamily(AppFonts.family())
+                .fontSize(13)
+                .fontColor(this.col('sub'))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+              Text(this.t('gen.streaming'))
+                .fontFamily(AppFonts.family())
+                .fontSize(12)
+                .fontColor('#4A90D9')
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          }
           // 深度思考过程：生成中实时滚动；完成后自动折叠
           if (this.thinkText !== '') {
             ThinkPanel({
@@ -499,7 +579,8 @@ export struct PlanContent {
                     .width('100%')
                     .padding(16)
                     .onAreaChange((_o: Area, n: Area): void => {
-                      this.resultTop = Number(n.globalPosition.y);
+                      // 记录屏幕绝对坐标，完成后与滚动内容顶部相减得到相对偏移
+                      this.resultAbsTop = Number(n.globalPosition.y);
                     })
             } else {
               Row() {
@@ -516,6 +597,10 @@ export struct PlanContent {
           }
           .width('100%')
           .padding(12)
+          .onAreaChange((_o: Area, n: Area): void => {
+            // 滚动内容容器的屏幕 Y 坐标：用于把结果面板的绝对坐标换算成相对偏移
+            this.scrollContentTop = Number(n.globalPosition.y);
+          })
         }
         .width('100%')
         .layoutWeight(1)

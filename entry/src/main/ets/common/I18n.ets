@@ -377,7 +377,23 @@ export class I18n {
     ['err.canceled', '任务已取消'],
     ['err.rateLimit', '请求过于频繁，请稍后再试'],
     ['err.taskMissing', '任务不存在或已过期'],
-    ['err.serverBusy', '服务异常，请稍后再试']
+    ['err.serverBusy', '服务异常，请稍后再试'],
+
+    // ---- 手表端上课指挥页 ----
+    ['watch.waitTitle', '等待接收教案'],
+    ['watch.waitHint', '手机端点击“流转”\n并选择本手表'],
+    ['watch.received', '已接收教案'],
+    ['watch.ready', '教案已就绪'],
+    ['watch.start', '开始上课'],
+    ['watch.stageRunning', '本环节进行中'],
+    ['watch.overtime', '时间到 · 上滑进入下一环节'],
+    ['watch.classEnd', '本节课结束'],
+    ['watch.stageCount', '共 {n} 个环节'],
+    ['watch.again', '再来一遍'],
+
+    // ---- 分享 / 批量导出 ----
+    ['share.bundleName', '备课产物压缩包'],
+    ['share.bundleDesc', '共 {n} 份文件']
   ]);
 
   private static readonly en: Map<string, string> = new Map<string, string>([
@@ -746,7 +762,23 @@ export class I18n {
     ['err.canceled', 'Task cancelled'],
     ['err.rateLimit', 'Too many requests. Please try again later'],
     ['err.taskMissing', 'Task not found or expired'],
-    ['err.serverBusy', 'Service error. Please try again later']
+    ['err.serverBusy', 'Service error. Please try again later'],
+
+    // ---- Watch class-command page ----
+    ['watch.waitTitle', 'Waiting for a lesson plan'],
+    ['watch.waitHint', 'Tap “Continue” on the phone\nand pick this watch'],
+    ['watch.received', 'Lesson plan received'],
+    ['watch.ready', 'Lesson plan is ready'],
+    ['watch.start', 'Start class'],
+    ['watch.stageRunning', 'Stage in progress'],
+    ['watch.overtime', 'Time is up · swipe up for next stage'],
+    ['watch.classEnd', 'Class finished'],
+    ['watch.stageCount', '{n} stages in total'],
+    ['watch.again', 'Go again'],
+
+    // ---- Sharing / batch export ----
+    ['share.bundleName', 'Lesson-prep files'],
+    ['share.bundleDesc', '{n} files in total']
   ]);
 
   /** 读取当前语言：'zh' | 'en' | 'ug' | 'bo' | 'mn'（默认 zh） */

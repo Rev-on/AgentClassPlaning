@@ -22,6 +22,9 @@ import { RichBox } from '../common/components/RichBox';
 import { RichHtml } from '../common/RichHtml';
 import { SafeInsets } from '../common/SafeInsets';
 
+/** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出 */
+const ResultTopPadding: number = 12;
+
 @Component
 export struct QuizContent {
   @State subject: string = I18n.t('def.subject');
@@ -46,6 +49,16 @@ export struct QuizContent {
   private doneScroll: Scroller = new Scroller();
   /** 结果预览在整页滚动内容中的顶部偏移（用于完成后自动定位） */
   private resultTop: number = 0;
+  /** 滚动内容容器的屏幕 Y 坐标（onAreaChange 记录，用于把绝对值换算成相对偏移） */
+  private scrollContentTop: number = 0;
+  /** 结果面板的屏幕 Y 坐标（onAreaChange 记录） */
+  private resultAbsTop: number = 0;
+
+  /** 由两个屏幕绝对坐标求「结果面板在滚动内容内的相对偏移」 */
+  private computeResultOffset(): number {
+    const rel: number = this.resultAbsTop - this.scrollContentTop;
+    return rel > 0 ? rel : 0;
+  }
   /** 用户是否点击了"停止生成" */
   private stopRequested: boolean = false;
 
@@ -54,7 +67,13 @@ export struct QuizContent {
     if (this.result === '') {
       return;
     }
-    this.doneScroll.scrollTo({ xOffset: 0, yOffset: Math.max(0, this.resultTop), animation: { duration: 350 } });
+    const target: number = this.computeResultOffset();
+    this.resultTop = target;
+    this.doneScroll.scrollTo({
+      xOffset: 0,
+      yOffset: Math.max(0, target - ResultTopPadding),
+      animation: { duration: 350 }
+    });
   }
 
   aboutToAppear(): void {
@@ -315,26 +334,14 @@ export struct QuizContent {
       .enabled(!this.loading)
       .opacity(this.loading ? 0.6 : 1)
 
-      if (this.loading) {
-        // 生成中：按钮变为"停止生成"（点击即停，保留半截预览）
-        Button(this.t('act.stop'))
-          .fontFamily(AppFonts.family())
-          .width('100%')
-          .height(44)
-          .backgroundColor('#C0564F')
-          .onClick(() => {
-            this.stopGen();
-          })
-      } else {
-        Button(this.t('act.quiz'))
-          .fontFamily(AppFonts.family())
-          .width('100%')
-          .height(44)
-          .backgroundColor('#3E9B6F')
-          .onClick(() => {
-            this.generate();
-          })
-      }
+      Button(this.t('act.quiz'))
+        .fontFamily(AppFonts.family())
+        .width('100%')
+        .height(44)
+        .backgroundColor('#3E9B6F')
+        .onClick(() => {
+          this.generate();
+        })
     }
     .width('100%')
     .padding(16)
@@ -387,6 +394,26 @@ export struct QuizContent {
       // 固定标题栏：整页滚动时标题栏保持不滚，并预留顶部安全区（状态栏/刘海避让）
       Column() {
         PageHeader({ title: this.t('page.quiz') })
+        // 生成中：标题栏下方固定一条"停止生成"操作条。
+        // 放在固定标题栏内而非输入卡片内 —— 生成过程中输入区可能被收起/禁用，
+        // 若停止按钮留在卡片里会随之消失或不可点，用户无法中断生成。
+        if (this.loading) {
+          Row() {
+            Button(this.t('act.stop'))
+              .fontFamily(AppFonts.family())
+              .fontSize(14)
+              .fontColor('#FFFFFF')
+              .height(34)
+              .backgroundColor('#C0564F')
+              .borderRadius(17)
+              .onClick(() => {
+                this.stopGen();
+              })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+          .padding({ left: 12, right: 12, bottom: 8 })
+        }
       }
       .width('100%')
       .padding({ top: this.topInset })
@@ -450,7 +477,7 @@ export struct QuizContent {
                     .width('100%')
                     .padding(16)
                     .onAreaChange((_o: Area, n: Area): void => {
-                      this.resultTop = Number(n.globalPosition.y);
+                      this.resultAbsTop = Number(n.globalPosition.y);
                     })
             } else {
               Row() {
@@ -467,6 +494,10 @@ export struct QuizContent {
           }
           .width('100%')
           .padding(12)
+          .onAreaChange((_o: Area, n: Area): void => {
+            // 滚动内容容器的屏幕 Y 坐标：用于把结果面板的绝对坐标换算成相对偏移
+            this.scrollContentTop = Number(n.globalPosition.y);
+          })
         }
         .width('100%')
         .layoutWeight(1)

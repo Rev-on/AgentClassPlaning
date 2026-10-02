@@ -403,9 +403,13 @@ export struct ResultPanel {
 
   /**
    * 读回编辑器全部内容（样式片段 → HTML）
-   * 优先走"原文 + 样式操作"的确定性回写：只要纯文本未被改动，就直接按记录的样式操作
-   * 改写原文 HTML，完全不依赖 RichEditor 的样式读回（部分设备读回会把内联标签整篇丢掉）；
-   * 仅在用户改动了文字时才退回 SDK 读回（此时原样式偏移已失效）。
+   *
+   * 两条路径都是确定性的，**完全不依赖 RichEditor 的样式读回**
+   * （部分设备读回会把内联标签整篇丢掉、字号返回 0 或编辑器默认值）：
+   *   1. 纯文本未改动 → 直接按记录的样式操作改写原文 HTML；
+   *   2. 纯文本被改动（用户输入/删除文字）→ 以原文样式为基准，
+   *      按"公共前后缀 + 改动区继承前一字样式"把样式搬到新文本上（RichHtml.rebaseHtml）。
+   * 编辑器的读回文本只用于取"新文字内容"，不用于取样式。
    */
   private readHtml(): string {
     if (!this.editorReady) {
@@ -424,43 +428,93 @@ export struct ResultPanel {
     } catch (e) {
       plainNow = '';
     }
-    if (plainNow !== '' && plainNow === RichHtml.plainOf(this.result)) {
+    // 文字是否被改动：必须用**归一化后**的比较。
+    // 原因：plainOf 保留块级换行（'\n光的反射\n\n一、目标\n'），而 getSpans 拼出的文本
+    // 会剥离首尾换行、压缩连续换行（'光的反射\n一、目标'）。直接相等比较永远为 false，
+    // 会导致"没改文字"也走 SDK 读回分支，进而把样式剥掉（点击完成后样式丢失的根因）。
+    const origPlain: string = RichHtml.plainOf(this.result);
+    const unchanged: boolean = plainNow !== '' && RichHtml.sameText(plainNow, origPlain);
+    if (unchanged) {
       // 文字未变：仅样式变化 —— 确定性回写（无样式操作则原样返回）
       if (this.styleOps.length === 0) {
         return this.result;
       }
       return RichHtml.applyStyleOps(this.result, this.styleOps);
     }
+    // 文字有改动：**不依赖 SDK 样式读回**，改用确定性重建。
+    // 原因：读回 textStyle 在部分设备上不稳定（字号返回 0 或编辑器默认值、
+    // 内联标签整篇丢失），会造成"输入新文本后标题降级为普通段落、加粗/颜色被剥除"。
+    // 做法：以原文的样式为基准，按"公共前后缀 + 改动区继承前一字样式"把样式搬到新文本上；
+    // 再叠加本次会话记录的样式操作（按编辑器坐标系映射）。
+    // 编辑器的读回文本仅用于取"新文字内容"（文本读回是可靠的），不用于取样式。
     try {
-      const spans = this.rc.getSpans();
-      const runs: RichRun[] = [];
-      for (let i: number = 0; i < spans.length; i++) {
-        const sp = spans[i];
-        const mayText: RichEditorTextSpanResult = sp as RichEditorTextSpanResult;
-        if (mayText.textStyle === undefined) {
-          continue;
-        }
-        const ts: RichEditorTextStyleResult = mayText.textStyle;
-        const value: string = mayText.value;
-        const bold: boolean = isBoldWeightOf(ts.fontWeight);
-        const italic: boolean = isItalicStyleOf(ts.fontStyle);
-        const underline: boolean = isUnderlineOf(ts.decoration);
-        const strike: boolean = isStrikeOf(ts.decoration);
-        // 取最后 6 位十六进制（处理 #AARRGGBB/ARGB 数值），默认墨色不计为自定义颜色
-        const col: string = this.decodeColor(ts.fontColor);
-        const color: string = col === '1b1b1f' ? '' : col;
-        const size: number = ts.fontSize || 0;
-        runs.push({
-          text: value, bold: bold, italic: italic, underline: underline, strike: strike,
-          color: color, heading: 0, size: size
-        });
-      }
-      // 文字有改动：用读回片段 + 映射后的样式操作重建（保证改动前后的样式尽量保留）
-      const mapped: StyleOp[] = RichHtml.mapOps(this.styleOps, RichHtml.plainOf(this.result), plainNow);
-      return RichHtml.runsToHtml(RichHtml.applyOpsToRuns(runs, mapped));
+      const opsLocal: StyleOp[] = this.remapOpsToEditorSpace();
+      return RichHtml.rebaseHtml(this.result, RichHtml.normalizeText(origPlain),
+        plainNow, opsLocal);
     } catch (e) {
       return this.result;
     }
+  }
+
+  /**
+   * 把样式操作从"原文（含块级换行）坐标系"换算到"编辑器归一化坐标系"。
+   *
+   * 做法：直接构造归一化结果，并同时记录「原文下标 -> 归一化下标」的对照表：
+   * 逐字符遍历原文，按与 normalizeText 完全相同的规则（连续换行只留一个、
+   * 首尾换行丢弃）决定该字符是否进入归一化文本，以及进入后的下标。
+   * 这样映射与 normalizeText 严格一致，不会出现偏移错位。
+   */
+  private remapOpsToEditorSpace(): StyleOp[] {
+    const out: StyleOp[] = [];
+    if (this.styleOps.length === 0) {
+      return out;
+    }
+    const orig: string = RichHtml.plainOf(this.result).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    // 1) 先按"压缩连续换行"生成中间文本，并记录每个原下标在中间文本中的位置
+    const mid: string[] = [];
+    const posMid: number[] = [];
+    let prevNl: boolean = false;
+    for (let i: number = 0; i < orig.length; i++) {
+      const ch: string = orig.charAt(i);
+      if (ch === '\n' && prevNl) {
+        posMid.push(-1);            // 被压缩掉
+        continue;
+      }
+      prevNl = ch === '\n';
+      posMid.push(mid.length);
+      mid.push(ch);
+    }
+    const midStr: string = mid.join('');
+    // 2) 去掉首尾换行，得到最终归一化文本；同时求前缀长度
+    let s: number = 0;
+    let e: number = midStr.length;
+    while (s < e && midStr.charAt(s) === '\n') {
+      s++;
+    }
+    while (e > s && midStr.charAt(e - 1) === '\n') {
+      e--;
+    }
+    const lead: number = s;
+    // 原文下标 -> 归一化下标
+    const toNorm = (idx: number): number => {
+      let j: number = idx;
+      while (j < posMid.length && posMid[j] < 0) {
+        j++;
+      }
+      const base: number = j < posMid.length ? posMid[j] : midStr.length;
+      const v: number = base - lead;
+      return v < 0 ? 0 : v;
+    };
+    for (let i: number = 0; i < this.styleOps.length; i++) {
+      const op: StyleOp = this.styleOps[i];
+      const ns: number = toNorm(op.start);
+      let ne: number = toNorm(op.end);
+      if (ne <= ns) {
+        continue;   // 选区被归一化吞掉，跳过
+      }
+      out.push({ kind: op.kind, on: op.on, color: op.color, start: ns, end: ne });
+    }
+    return out;
   }
 
   /** 选区样式快照读取（供工具栏 toggle；工具栏点击后实时选区可能被收起，因此只用 onSelect 时快照） */

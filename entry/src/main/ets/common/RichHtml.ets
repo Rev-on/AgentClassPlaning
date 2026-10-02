@@ -132,6 +132,42 @@ export class RichHtml {
   }
 
   /**
+   * 编辑器读回文本的归一化：用于与 plainOf 做「文字是否被改动」的比对。
+   *
+   * 背景（曾导致"点击完成后样式丢失"）：
+   *   htmlToRuns 把每个块级标签（<p>/<h2>/<div>…）转成 '\n'，
+   *   因此 plainOf 的结果形如 '\n光的反射\n\n一、教学目标\n'（首尾与段间都有换行）。
+   *   而 RichEditor.getSpans() 拼出的文本会把首尾换行剥离、连续换行压缩为单个，
+   *   得到 '光的反射\n一、教学目标'。
+   *   两者永远不相等 —— 即使用户一个字都没改，也会被误判为"文字有改动"，
+   *   从而落入 SDK 样式读回分支，样式在该分支被剥除。
+   *
+   * 归一化规则（两侧都施用，保证同一坐标系）：
+   *   1. 统一换行符为 \n
+   *   2. 压缩连续换行为单个 \n
+   *   3. 去首尾换行
+   */
+  static normalizeText(s: string): string {
+    let t: string = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    t = t.replace(/\n{2,}/g, '\n');
+    // 去首尾换行（等价 trim('\n')，ArkTS 不保证支持 trim 带参形式）
+    let start: number = 0;
+    let end: number = t.length;
+    while (start < end && t.charAt(start) === '\n') {
+      start++;
+    }
+    while (end > start && t.charAt(end - 1) === '\n') {
+      end--;
+    }
+    return t.substring(start, end);
+  }
+
+  /** 归一化后比较两段文本是否等价（忽略块级换行带来的差异） */
+  static sameText(a: string, b: string): boolean {
+    return RichHtml.normalizeText(a) === RichHtml.normalizeText(b);
+  }
+
+  /**
    * 按编辑器记录的样式操作确定性改写 HTML（保存回写用，不依赖 SDK 样式读回）：
    * 原文解析为片段 → 在纯文本偏移处切分 → 应用样式开关 → 重建 HTML。
    */
@@ -188,9 +224,148 @@ export class RichHtml {
     return out;
   }
 
+  /**
+   * 文字被改动后，把**原文的样式**确定性地搬到新文本上。
+   *
+   * 为什么需要它：
+   *   RichEditor 的样式读回（getSpans().textStyle）在部分设备上不稳定 ——
+   *   字号读回为 0 或编辑器默认值、内联标签整篇丢失。若在"用户输入了新文字"时
+   *   依赖读回来重建 HTML，标题（<h2>/<h3>）会被降级为普通段落、加粗/颜色被剥除，
+   *   即"输入新文本后保存退出丢失格式"。
+   *
+   * 做法（与 mapOps 的"丢弃跨越改动区间的操作"不同，这里保留全部样式）：
+   *   1. 求原文与新文本的公共前缀长度 cp、公共后缀长度 cs；
+   *   2. 把新文本切成三段：前缀区 / 改动区 / 后缀区；
+   *   3. 前缀区的样式按原样沿用（偏移不变）；
+   *      后缀区的样式整体平移 delta = now.length - orig.length；
+   *      改动区（用户新输入的部分）继承其**前一个字符**的样式，
+   *      保证"在加粗文字后面接着打字"时新字也是加粗的，符合直觉；
+   *   4. 另叠加本次编辑会话记录的样式操作（按编辑器坐标系映射后应用）。
+   *
+   * @param html 原始富文本 HTML
+   * @param origPlain 原文纯文本（plainOf 坐标系）
+   * @param nowPlain  编辑器读回的新纯文本（归一化坐标系）
+   * @param ops       本次会话的样式操作（已换算到 nowPlain 坐标系）
+   */
+  static rebaseHtml(html: string, origPlain: string, nowPlain: string, ops: StyleOp[]): string {
+    const base: RichRun[] = RichHtml.htmlToRuns(html);
+    if (nowPlain === '') {
+      return html;
+    }
+    // 原文在 base 坐标系下的纯文本（与 base 的 run.text 完全对齐）
+    let basePlain: string = '';
+    for (let i: number = 0; i < base.length; i++) {
+      basePlain += base[i].text;
+    }
+    // 关键：origPlain 传进来时已被 normalizeText 处理（去掉了首尾换行），
+    // 而 base 的 run.text 仍带这些换行，两者相差 lead 个偏移。
+    // 这里求出前导偏移，把所有下标统一换算到 base 坐标系，避免样式整体错位一位。
+    const lead: number = basePlain.indexOf(origPlain);
+    const off: number = lead >= 0 ? lead : 0;
+
+    // 1) 公共前后缀（在归一化文本坐标系上计算）
+    const minLen: number = origPlain.length < nowPlain.length ? origPlain.length : nowPlain.length;
+    let cp: number = 0;
+    while (cp < minLen && origPlain.charAt(cp) === nowPlain.charAt(cp)) {
+      cp++;
+    }
+    let cs: number = 0;
+    while (cs < (minLen - cp) &&
+      origPlain.charAt(origPlain.length - 1 - cs) === nowPlain.charAt(nowPlain.length - 1 - cs)) {
+      cs++;
+    }
+
+    // 2) 取"前一个字符"的样式作为改动区继承样式（下标换算到 base 坐标系）
+    const styleAtBase = (idxBase: number): RichRun | null => {
+      let acc: number = 0;
+      for (let i: number = 0; i < base.length; i++) {
+        const r: RichRun = base[i];
+        if (idxBase < acc + r.text.length) {
+          return r;
+        }
+        acc += r.text.length;
+      }
+      return base.length > 0 ? base[base.length - 1] : null;
+    };
+    const inheritFrom: RichRun | null = cp > 0 ? styleAtBase(cp - 1 + off)
+      : (base.length > 0 ? base[0] : null);
+
+    // 3) 按三段重建：前缀沿用原样式、改动区继承前一字样式、后缀整体平移
+    const out: RichRun[] = [];
+    const pushRun = (text: string, src: RichRun | null): void => {
+      if (text === '') {
+        return;
+      }
+      if (src === null) {
+        out.push({ text: text, bold: false, italic: false, underline: false, strike: false,
+          color: '', heading: 0, size: 0 });
+        return;
+      }
+      const last: RichRun | undefined = out.length > 0 ? out[out.length - 1] : undefined;
+      if (last !== undefined && last.bold === src.bold && last.italic === src.italic &&
+        last.underline === src.underline && last.strike === src.strike &&
+        last.color === src.color && last.heading === src.heading && last.size === src.size) {
+        last.text += text;
+      } else {
+        out.push({ text: text, bold: src.bold, italic: src.italic, underline: src.underline,
+          strike: src.strike, color: src.color, heading: src.heading, size: src.size });
+      }
+    };
+
+    // 前缀：base 文本 [off, off+cp) —— 样式逐一沿用。
+    // 注意前缀里可能含"归一化时被删掉的换行"（原文连续换行），
+    // 输出文本直接取自 nowPlain，避免把多余换行带回来。
+    let acc: number = 0;
+    let emitted: number = 0;
+    for (let i: number = 0; i < base.length && emitted < cp; i++) {
+      const r: RichRun = base[i];
+      const rStart: number = acc;
+      const rEnd: number = acc + r.text.length;
+      acc = rEnd;
+      const from: number = Math.max(rStart, off);
+      const to: number = Math.min(rEnd, off + cp);
+      if (to <= from) {
+        continue;
+      }
+      const take: number = to - from;
+      pushRun(nowPlain.substring(emitted, emitted + take), r);
+      emitted += take;
+    }
+    // 改动区：新文本 [cp, nowLen - cs) —— 继承前一个字符的样式
+    const midEnd: number = nowPlain.length - cs;
+    if (midEnd > cp) {
+      pushRun(nowPlain.substring(cp, midEnd), inheritFrom);
+    }
+    // 后缀：base 文本 [off + origLen - cs, off + origLen)
+    if (cs > 0) {
+      const suffixStartBase: number = off + origPlain.length - cs;
+      let sacc: number = 0;
+      let written: number = midEnd;
+      for (let i: number = 0; i < base.length; i++) {
+        const r: RichRun = base[i];
+        const rStart: number = sacc;
+        const rEnd: number = sacc + r.text.length;
+        sacc = rEnd;
+        if (rEnd <= suffixStartBase) {
+          continue;
+        }
+        const fromBase: number = Math.max(rStart, suffixStartBase);
+        if (fromBase >= rEnd) {
+          continue;
+        }
+        const take: number = rEnd - fromBase;
+        pushRun(nowPlain.substring(written, written + take), r);
+        written += take;
+      }
+    }
+
+    // 4) 叠加本次会话的样式操作（已在编辑器坐标系）
+    const applied: RichRun[] = ops.length === 0 ? out : RichHtml.applyOpsToRuns(out, ops);
+    return RichHtml.runsToHtml(applied);
+  }
+
   /** 在指定纯文本偏移处切分片段（保证样式区间边界对齐） */
-  private static splitRunsAt(runs: RichRun[], pos: number): RichRun[] {
-    if (pos <= 0) {
+  private static splitRunsAt(runs: RichRun[], pos: number): RichRun[] {    if (pos <= 0) {
       return runs;
     }
     const out: RichRun[] = [];

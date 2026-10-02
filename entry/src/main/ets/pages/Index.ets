@@ -15,6 +15,8 @@ import { Greeting } from '../common/Greeting';
 import { ResultBus } from '../common/ResultBus';
 import { DuoDetect } from '../common/DuoDetect';
 import { Duo2in1 } from '../common/Duo2in1';
+import { FoldDetect } from '../common/FoldDetect';
+import { LayoutPolicy } from '../common/LayoutPolicy';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
 import { IndexWide } from './IndexWide';
 import { IndexWideDuo } from './IndexWideDuo';
@@ -228,38 +230,37 @@ struct Index {
     this.startGreeting();
   }
 
-  /** 判定并应用两栏布局（宽>高 且 宽>=900vp 且 高>=520vp，覆盖主流平板横屏）
-   *  半折叠双屏形态（无磁吸键盘，displayId=999 存在）铺窗后窗口呈上下竖长，仍须按宽屏 duo 处理 */
+  /** 判定并应用布局（折叠屏形态 + 窗口尺寸 + 输入设备 → 单栏/双栏/上下分屏）
+   *  折叠屏：展开按大屏布局、半折按上下分屏；2in1：大横屏且未接键盘时上下分屏 */
   private applyWide(vw: number, vh: number): void {
     this.lastVw = vw;
     this.lastVh = vh;
-    const geometryWide: boolean = vw > vh && vw >= 900 && vh >= 520;
-    const twoScreen: boolean = DuoDetect.supported() && DuoDetect.hasLowerHalf();
-    const wide: boolean = geometryWide || twoScreen;
-    AppStorage.setOrCreate('appWideLayout', wide);
+    AppStorage.setOrCreate('appWideLayout', vw > vh && vw >= 900 && vh >= 520);
     this.refreshDuo(vw, vh);
     // 窗口尺寸变化后（展开/半折切换、跨轴铺窗完成等）重试一次双屏铺窗，保证状态自愈
     this.syncDuoWindow();
   }
 
-  /** 2in1 上下分屏判定（结果屏布局已取消手动开关，固定自动检测）
-   *  自动：仅 2in1 设备、大横屏、磁吸键盘未连接时启用（键盘模式=平板布局）
-   */
+  /** 应用一次布局决策（把 LayoutPolicy 的结果写入 AppStorage，供各页面消费） */
+  private applyDecision(vw: number, vh: number, kb: boolean, lowerHalf: boolean): void {
+    this.lastVw = vw;
+    this.lastVh = vh;
+    const d = LayoutPolicy.decide(vw, vh, kb, lowerHalf);
+    AppStorage.setOrCreate('appWideLayout', d.wide);
+    AppStorage.setOrCreate('appDuo', d.duo);
+    AppStorage.setOrCreate('appTwoScreen', d.twoScreen);
+    AppStorage.setOrCreate('appSidebarVp', d.sidebarVp);
+    AppStorage.setOrCreate('appFoldForm', d.form as number);
+    AppStorage.setOrCreate('appCreaseVp', d.creaseVp);
+  }
+
+  /** 2in1 上下分屏判定（键盘模式=平板布局；折叠屏半折/双屏形态优先上下分区） */
   private refreshDuo(vw: number, vh: number): void {
-    const geometryWide: boolean = vw > vh && vw >= 900 && vh >= 520;
-    // 半折叠双屏形态（物理下半屏存在）即使窗口偏小/偏竖也应启用 duo，铺窗后由 FoldSplitContainer 分配到上下两屏
-    const twoScreen: boolean = DuoDetect.supported() && DuoDetect.hasLowerHalf();
-    const candidate: boolean = (DuoDetect.supported() && geometryWide && vw >= 1000 && vh >= 760) || twoScreen;
-    if (!candidate) {
-      AppStorage.setOrCreate('appDuo', false);
-      return;
-    }
+    const lowerHalf: boolean = DuoDetect.supported() && DuoDetect.hasLowerHalf();
     DuoDetect.keyboardDocked().then((kb: boolean) => {
-      // 半折叠双屏形态（下半屏已存在）必然无磁吸键盘遮挡，直接启用 duo，不再受外接键盘检测影响；
-      // 键盘吸回后下屏消失（twoScreen=false），此处自然回退为 !kb 判定
-      AppStorage.setOrCreate('appDuo', twoScreen || !kb);
+      this.applyDecision(vw, vh, kb, lowerHalf);
     }).catch(() => {
-      AppStorage.setOrCreate('appDuo', twoScreen);
+      this.applyDecision(vw, vh, false, lowerHalf);
     });
   }
 
@@ -438,6 +439,23 @@ struct Index {
     } catch (e) {
       // 不支持显示器监听时依赖键盘热插拔事件
     }
+    // 折叠屏形态变化（双折叠/阔折叠/三折叠的折叠↔半折↔展开、内外屏切换）→ 重判布局。
+    // 展开瞬间窗口尺寸可能尚未更新，故延迟一帧再读取实际尺寸，避免按旧尺寸误判而闪回单栏。
+    FoldDetect.attach(() => {
+      this.onFoldChanged();
+    });
+  }
+
+  /** 折叠形态变化：延迟重判（等系统完成窗口尺寸切换后再读取，避免过渡态误判） */
+  private onFoldChanged(): void {
+    setTimeout(() => {
+      this.refreshWide();
+    }, 120);
+    // 再补一次：部分机型尺寸切换较慢，二次确认保证最终形态正确
+    setTimeout(() => {
+      this.refreshWide();
+      this.syncDuoWindow();
+    }, 420);
   }
 
   /** 屏幕增删/变化后稍作延迟重判形态，等系统完成上下屏切换后再铺窗 */
@@ -466,6 +484,7 @@ struct Index {
       // ignore
     }
     DuoDetect.detach();
+    FoldDetect.detach();
   }
 
   /** 启动问候打字机：大字逐字出现后小字逐字出现（快速效果） */
@@ -499,9 +518,12 @@ struct Index {
 
   aboutToAppear(): void {
     this.ensureFonts();
-    // 2in1 形态与结果面板初始占位（避免 @StorageProp/@StorageLink 首帧未绑定）
+    // 布局形态初始占位（避免 @StorageProp/@StorageLink 首帧未绑定）
     AppStorage.setOrCreate('appDuo', false);
     AppStorage.setOrCreate('appTwoScreen', false);
+    AppStorage.setOrCreate('appSidebarVp', 400);
+    AppStorage.setOrCreate('appFoldForm', 0);
+    AppStorage.setOrCreate('appCreaseVp', 0);
     ResultBus.init();
     // 进入应用：按时段与工作日/节假日计算问候语并逐字显示
     this.startGreeting();

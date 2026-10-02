@@ -8,6 +8,7 @@ import common from '@ohos.app.ability.common';
 import promptAction from '@ohos.promptAction';
 import { FoldSplitContainer } from '@kit.ArkUI';
 import { Duo2in1 } from '../common/Duo2in1';
+import { FoldForm } from '../common/FoldDetect';
 import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
@@ -253,8 +254,8 @@ export struct IndexWideDuo {
   /** 底部页签高亮选择块：单格宽度与当前偏移（vp，onAreaChange 测量后生效） */
   @State tabSlot: number = 0;
   @State tabOff: number = 0;
-  /** 左栏（手机式面板）宽度（vp） */
-  private readonly NAV_W: number = 400;
+  /** 左栏（手机式面板）宽度：由 LayoutPolicy 按设备形态给出（三折叠/阔折叠更宽），缺省 400 */
+  @StorageProp('appSidebarVp') sidebarVp: number = 400;
 
   private t(key: string): string {
     void this.appLang;
@@ -271,8 +272,13 @@ export struct IndexWideDuo {
     return Duo2in1.topHeightVp();
   }
 
-  /** 折痕区高度（vp）：上下屏之间的物理缝隙，内容需要避让 */
+  /** 折痕区高度（vp）：上下屏之间的物理缝隙，内容需要避让。
+   *  优先取 FoldDetect 汇总值（三折叠会返回多条折痕，已累加），无则回退 2in1 接缝实现。 */
   private creaseVp(): number {
+    const fromFold: number = AppStorage.get<number>('appCreaseVp') as number;
+    if (fromFold !== undefined && fromFold > 0) {
+      return fromFold;
+    }
     return Duo2in1.creaseVp();
   }
 
@@ -499,7 +505,7 @@ export struct IndexWideDuo {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.col('title'))
           Blank()
-          Text('Agent备课')
+          Text($r('app.string.app_name'))
             .fontFamily(AppFonts.family())
             .fontSize(12)
             .fontColor(this.col('faint'))
@@ -563,7 +569,7 @@ export struct IndexWideDuo {
         .borderRadius(12)
         .margin({ top: 2, bottom: 8 })
       }
-      .width(this.NAV_W)
+      .width(this.sidebarVp)
       .height('100%')
       .padding({ left: 10, right: 10 })
       .backgroundColor(this.col('card'))
@@ -638,7 +644,10 @@ export struct IndexWideDuo {
       // 双屏形态：窗口已跨轴铺满上下两屏，手动按物理屏精确分区（结果真正落到下屏）
       this.duoTwoPane()
     } else {
-      // 单屏形态（展开平板/兼容回退）：FoldSplitContainer 在单屏内上下分栏
+      // 单屏形态（展开平板 / 折叠屏半折 / 兼容回退）：FoldSplitContainer 按系统折叠状态自动分栏
+      //  - expandedLayoutOptions：完全展开（双折叠/阔折叠/三折叠展开）时工具区与结果区比例
+      //  - hoverModeLayoutOptions：半折悬停时上下分区
+      //  - foldedLayoutOptions：合起（用外屏）时上下比例
       FoldSplitContainer({
         primary: () => {
           this.upperPane()
@@ -646,12 +655,26 @@ export struct IndexWideDuo {
         secondary: () => {
           this.resultBar()
         },
-        expandedLayoutOptions: { verticalSplitRatio: 1.5 },
+        expandedLayoutOptions: { verticalSplitRatio: this.expandedRatio() },
         hoverModeLayoutOptions: { showExtraRegion: false },
         foldedLayoutOptions: { verticalSplitRatio: 1 }
       })
         .width('100%')
         .height('100%')
     }
+  }
+
+  /**
+   * 展开态上下比例：
+   *  - 三折叠展开后纵向空间充裕，工具区给更大比例（1.7）以完整展示卡片网格
+   *  - 其余（单折轴折叠屏 / 平板 / 2in1）沿用 1.5
+   */
+  private expandedRatio(): number {
+    const form: number = AppStorage.get<number>('appFoldForm') as number;
+    // FoldForm: NONE=0 DUAL=1 WIDE=2 TRIPLE=3
+    if (form === FoldForm.TRIPLE) {
+      return 1.7;
+    }
+    return 1.5;
   }
 }

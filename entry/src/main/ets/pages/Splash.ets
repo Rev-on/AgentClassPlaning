@@ -370,7 +370,7 @@ struct Splash {
         Column()
           .layoutWeight(0.55)
           .width('100%')
-        Text('Agent备课')
+        Text($r('app.string.app_name'))
           .fontFamily(AppFonts.family())
           .fontSize(this.subSize + 3)
           .fontWeight(FontWeight.Medium)

@@ -14,6 +14,8 @@ import common from '@ohos.app.ability.common';
 import { WatchLayout, WatchAvoid } from '../common/WatchLayout';
 import { WatchLink, WatchLessonBundle } from '../common/WatchLink';
 import { LessonPlanParser, LessonStage } from '../common/LessonPlanParser';
+import { I18n } from '../common/I18n';
+import { AppFonts } from '../common/AppFonts';
 
 //#if OHOS
 import { vibrator } from '@kit.SensorServiceKit';
@@ -39,8 +41,16 @@ struct WatchHome {
   @State remain: number = 0;
   /** 当前环节是否已到点（震动过，等待上滑） */
   @State overtime: boolean = false;
+  /** 订阅界面语言：切换语言后本页文案即时刷新 */
+  @StorageProp('appLang') appLang: string = 'zh';
   private timerId: number = -1;
   private ctx: common.UIAbilityContext | null = null;
+
+  /** 取当前语言文案（void appLang 建立刷新依赖） */
+  private t(key: string): string {
+    void this.appLang;
+    return I18n.t(key);
+  }
 
   aboutToAppear(): void {
     const c = getContext(this) as common.UIAbilityContext;
@@ -165,13 +175,13 @@ struct WatchHome {
     Column({ space: 10 }) {
       Text('⌛')
         .fontSize(34)
-      Text('等待接收教案')
-        .fontFamily('sans-serif')
+      Text(this.t('watch.waitTitle'))
+        .fontFamily(AppFonts.family())
         .fontSize(16)
         .fontColor(C_TEXT)
         .fontWeight(FontWeight.Medium)
-      Text('手机端点击“流转”\n并选择本手表')
-        .fontFamily('sans-serif')
+      Text(this.t('watch.waitHint'))
+        .fontFamily(AppFonts.family())
         .fontSize(12)
         .fontColor(C_SUB)
         .textAlign(TextAlign.Center)
@@ -189,8 +199,8 @@ struct WatchHome {
         .fontSize(44)
         .fontColor(C_GREEN)
         .fontWeight(FontWeight.Bold)
-      Text('已接收教案')
-        .fontFamily('sans-serif')
+      Text(this.t('watch.received'))
+        .fontFamily(AppFonts.family())
         .fontSize(20)
         .fontColor(C_TEXT)
         .fontWeight(FontWeight.Bold)
@@ -203,8 +213,8 @@ struct WatchHome {
   @Builder
   startView() {
     Column({ space: 18 }) {
-      Text('教案已就绪')
-        .fontFamily('sans-serif')
+      Text(this.t('watch.ready'))
+        .fontFamily(AppFonts.family())
         .fontSize(15)
         .fontColor(C_SUB)
       Button() {
@@ -212,8 +222,8 @@ struct WatchHome {
           Text('▶')
             .fontSize(26)
             .fontColor('#FFFFFF')
-          Text('开始上课')
-            .fontFamily('sans-serif')
+          Text(this.t('watch.start'))
+            .fontFamily(AppFonts.family())
             .fontSize(18)
             .fontColor('#FFFFFF')
             .fontWeight(FontWeight.Bold)
@@ -244,7 +254,7 @@ struct WatchHome {
       // 环节序号 + 名
       Row({ space: 6 }) {
         Text((this.segIdx + 1) + ' / ' + this.stageTotal() + ' · ' + this.stage().name)
-          .fontFamily('sans-serif')
+          .fontFamily(AppFonts.family())
           .fontSize(15)
           .fontColor(C_TEXT)
           .fontWeight(FontWeight.Medium)
@@ -256,15 +266,15 @@ struct WatchHome {
 
       // 倒计时
       Text(LessonPlanParser.formatClock(this.remain))
-        .fontFamily('sans-serif')
+        .fontFamily(AppFonts.family())
         .fontSize(this.avoid.round ? 34 : 40)
         .fontColor(this.overtime ? C_GREEN : '#FFD24A')
         .fontWeight(FontWeight.Bold)
         .opacity(this.overtime ? 0.85 : 1)
 
       // 提示
-      Text(this.stage().hint === '' ? '本环节进行中' : this.stage().hint)
-        .fontFamily('sans-serif')
+      Text(this.stage().hint === '' ? this.t('watch.stageRunning') : this.stage().hint)
+        .fontFamily(AppFonts.family())
         .fontSize(12)
         .fontColor(C_SUB)
         .textAlign(TextAlign.Center)
@@ -276,8 +286,8 @@ struct WatchHome {
           Text('▲')
             .fontSize(12)
             .fontColor(C_GREEN)
-          Text('时间到 · 上滑进入下一环节')
-            .fontFamily('sans-serif')
+          Text(this.t('watch.overtime'))
+            .fontFamily(AppFonts.family())
             .fontSize(11)
             .fontColor(C_GREEN)
         }
@@ -294,18 +304,18 @@ struct WatchHome {
     Column({ space: 12 }) {
       Text('🎉')
         .fontSize(40)
-      Text('本节课结束')
-        .fontFamily('sans-serif')
+      Text(this.t('watch.classEnd'))
+        .fontFamily(AppFonts.family())
         .fontSize(18)
         .fontColor(C_TEXT)
         .fontWeight(FontWeight.Bold)
-      Text('共 ' + this.stageTotal() + ' 个环节')
-        .fontFamily('sans-serif')
+      Text(this.t('watch.stageCount').replace('{n}', this.stageTotal().toString()))
+        .fontFamily(AppFonts.family())
         .fontSize(12)
         .fontColor(C_SUB)
       Button() {
-        Text('再来一遍')
-          .fontFamily('sans-serif')
+        Text(this.t('watch.again'))
+          .fontFamily(AppFonts.family())
           .fontSize(14)
           .fontColor('#FFFFFF')
       }

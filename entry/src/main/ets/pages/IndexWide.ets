@@ -49,8 +49,8 @@ export struct IndexWide {
   /** 底部页签高亮选择块：单格宽度与当前偏移（vp，onAreaChange 测量后生效） */
   @State tabSlot: number = 0;
   @State tabOff: number = 0;
-  /** 左栏（手机式面板）宽度（vp） */
-  private readonly NAV_W: number = 400;
+  /** 左侧栏宽度：由 LayoutPolicy 按设备形态给出（三折叠/阔折叠更宽），缺省 400 */
+  @StorageProp('appSidebarVp') sidebarVp: number = 400;
 
   private t(key: string): string {
     void this.appLang;
@@ -283,7 +283,7 @@ export struct IndexWide {
             .fontWeight(FontWeight.Bold)
             .fontColor(this.col('title'))
           Blank()
-          Text('Agent备课')
+          Text($r('app.string.app_name'))
             .fontFamily(AppFonts.family())
             .fontSize(12)
             .fontColor(this.col('faint'))
@@ -349,7 +349,7 @@ export struct IndexWide {
         .borderRadius(12)
         .margin({ top: 2, bottom: 8 })
       }
-      .width(this.NAV_W)
+      .width(this.sidebarVp)
       .height('100%')
       .padding({ left: 10, right: 10 })
       .backgroundColor(this.col('card'))

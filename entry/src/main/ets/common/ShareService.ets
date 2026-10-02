@@ -108,8 +108,9 @@ export class ShareService {
         }
         produced.push(filePath);
       }
-      // 2) 打包为单个 ZIP
-      zipPath = ctx.filesDir + '/备课产物_' + Date.now() + '.zip';
+      // 2) 打包为单个 ZIP（文件名用共享文案，经 fileNameOf 过滤掉文件名非法字符）
+      zipPath = ctx.filesDir + '/' + ShareService.fileNameOf(I18n.t('share.bundleName')) +
+        '_' + Date.now() + '.zip';
       await zlib.compressFiles(produced, zipPath, {
         level: zlib.CompressLevel.COMPRESS_LEVEL_DEFAULT_COMPRESSION
       });
@@ -118,9 +119,9 @@ export class ShareService {
       const record: systemShare.SharedRecord = {
         utd: ShareService.UTD_ZIP,
         uri: uri,
-        title: '备课产物压缩包',
-        label: '备课产物压缩包',
-        description: '共 ' + items.length + ' 份文件'
+        title: I18n.t('share.bundleName'),
+        label: I18n.t('share.bundleName'),
+        description: I18n.t('share.bundleDesc').replace('{n}', items.length.toString())
       };
       const data: systemShare.SharedData = new systemShare.SharedData(record);
       const controller: systemShare.ShareController = new systemShare.ShareController(data);
