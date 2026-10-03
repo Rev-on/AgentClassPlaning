@@ -114,10 +114,8 @@ struct Splash {
         familyName: AppFonts.UYGHUR,
         familySrc: $rawfile('fonts/UKIJMejT.ttf')
       });
-      this.getUIContext().getFont().registerFont({
-        familyName: AppFonts.MONGOLIAN,
-        familySrc: $rawfile('fonts/c8abb3845e34a252fcf04f0cd4e74a00.ttf')
-      });
+      // 蒙古文已改为西里尔蒙古文（标准西里尔字符集），系统默认字体即可显示，
+      // 不再注册专用蒙文字体
     } catch (e) {
       // 注册失败时回退系统字体，不影响启动
     }

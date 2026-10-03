@@ -866,7 +866,7 @@ export class I18n {
       return 'བོད་སྐད།';
     }
     if (code === 'mn') {
-      return 'ᠮᠣᠩᠭᠣᠯ ᠬᠡᠯᠡ';
+      return 'Монгол хэл';
     }
     return '简体中文';
   }
