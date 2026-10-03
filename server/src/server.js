@@ -12,6 +12,8 @@
  *   GET  /api/task/:id         查询任务状态与结果
  *   GET  /api/tasks?deviceId=  按设备列出最近任务
  *   POST /api/push/register    上报设备 Push Token
+ *   POST /api/push/receipt     接收华为 Push Kit 消息回执（华为服务器回调）
+ *   GET  /api/push/receipt/stats 回执统计（调试用，需代理令牌）
  *
  * 启动：cp .env.example .env 并填写密钥，然后 npm start
  */
@@ -23,6 +25,7 @@ const http = require('http');
 const https = require('https');
 const tasks = require('./tasks');
 const push = require('./push');
+const pushReceipt = require('./pushReceipt');
 const rag = require('./rag');
 
 /** 消息推送总开关：客户端已取消通知/推送功能，默认关闭；如需重新启用设环境变量 PUSH_ENABLED=1 */
@@ -820,6 +823,51 @@ app.post('/api/push/register', checkToken, (req, res) => {
   }
   tasks.registerDevice(deviceId, token);
   res.json({ ok: true });
+});
+
+/* ===================== 华为 Push Kit 消息回执 ===================== */
+
+/**
+ * 回执接收地址：由华为推送服务器回调（不是 App 调用）。
+ *
+ * 在 AppGallery Connect「项目设置 → 消息回执」中把「回调地址」填成本服务地址，
+ * 形如：https://<域名或IP>:<端口>/api/push/receipt
+ *
+ * 注意：本路由**不使用 checkToken** —— 调用方是华为服务器，它只会带
+ * X-HUAWEI-CALLBACK-ID 鉴权头；代理令牌校验在这里由 pushReceipt.verify 取代。
+ *
+ * 关于 AGC 控制台的「回执测试」：
+ *   该测试发的是**连通性探测**（不带 X-HUAWEI-CALLBACK-ID、无业务数据），
+ *   为了让控制台能通过校验，探测请求返回 200 + code=0。
+ *   真实回执若带了鉴权头但签名不符，仍会被拒绝（code=1）。
+ */
+app.post('/api/push/receipt', (req, res) => {
+  const v = pushReceipt.verify(req);
+  if (!v.ok) {
+    console.warn('[push-receipt] 鉴权失败: ' + v.reason);
+    // 华为要求返回 200 + code；鉴权失败时用非 0 code 明确拒绝
+    res.status(200).json({ code: '1', message: 'auth failed: ' + v.reason });
+    return;
+  }
+  const body = req.body || {};
+  const r = pushReceipt.handleStatuses(body.statuses);
+  if (v.probe === true) {
+    // 连通性探测：无回执数据，仅确认地址可达
+    console.log('[push-receipt] 收到连通性探测（无鉴权头），已返回 200');
+  } else {
+    console.log('[push-receipt] 收到回执 ' + r.received + ' 条：成功 ' + r.ok + '，失败 ' + r.fail);
+  }
+  res.status(200).json({ code: '0', message: 'success' });
+});
+
+// 连通性探测：部分控制台校验用 GET 探活，同样返回 200（否则会报 404）
+app.get('/api/push/receipt', (req, res) => {
+  res.status(200).json({ code: '0', message: 'success' });
+});
+
+// 回执统计（调试用；此路由是给运维/开发看的，故保留代理令牌校验）
+app.get('/api/push/receipt/stats', checkToken, (req, res) => {
+  res.json({ ok: true, receipt: pushReceipt.stats() });
 });
 
 /* ===================== 新课标 RAG 索引（学科索引 + 内容索引） ===================== */

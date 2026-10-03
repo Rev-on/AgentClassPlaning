@@ -43,6 +43,13 @@ export struct PlanContent {
   /** 思考过程是否展开（生成中展开实时滚动，生成完成后自动折叠，点击标题可再次展开） */
   @State thinkExpanded: boolean = true;
   @State thinkRunning: boolean = false;
+  /**
+   * 本次生成是否预期产生思考过程（生成时按"深度思考"开关置位）。
+   * 思考框的显示条件用它而非 thinkText !== ''，保证：
+   *  - 开关开启时，点击生成立刻出现思考框（占位"正在思考…"），不会因思考增量晚到而缺失；
+   *  - 开关关闭（快速模式）时不显示，避免每次生成都闪一个空框。
+   */
+  @State thinkExpected: boolean = false;
   @State result: string = '';
   /**
    * 生成中是否已把输入卡片收起（让预览框"扩大"占满可视区）。
@@ -190,6 +197,11 @@ export struct PlanContent {
     this.thinkText = '';
     this.thinkExpanded = true;
     this.thinkRunning = true;
+    // 本次生成是否可能产生思考过程（由开关决定）。
+    // 用于"立即显示思考框" —— 不能等 thinkText 非空才渲染，否则在
+    // 「首个正文字块先于任何思考增量到达」时，thinkRunning 被置 false，
+    // 而 thinkText 仍为空 → 思考框整个不显示，表现为"直接跳到正文生成"。
+    this.thinkExpected = AppStorage.get<boolean>(AppSettings.KEY_THINK) === true;
     // 开始新的生成：清除旧草稿，避免旧结果回魂
     PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
@@ -234,6 +246,9 @@ export struct PlanContent {
       this.thinkRunning = false;
       // 生成结束（完成/失败/停止）：思考过程自动折叠，用户点击标题可展开查看
       this.thinkExpanded = false;
+      // 思考框随生成态结束而收起；若本次确实产生了思考内容，
+      // 完成态视图会按 thinkText !== '' 继续展示（可点击标题展开）
+      this.thinkExpected = false;
       // 生成完成后自动上滑到结果预览顶部，让顶部操作按钮露出。
       // 分两步：先等一帧让"生成态→完成态"的布局切换（预览框重建为整页滚动）完成，
       // 再等一帧读取 onAreaChange 记录到的坐标，避免用旧坐标滚动导致定位偏差。
@@ -387,9 +402,18 @@ export struct PlanContent {
       .enabled(!this.loading)
       .opacity(this.loading ? 0.6 : 1)
 
-      // 生成中的"停止生成"按钮已移到页面顶部标题栏下方的固定操作条，
-      // 避免因生成中收起输入卡片而随卡片一起消失（用户将无法中断生成）。
-      if (!this.loading && this.result !== '') {
+      // 生成中：按钮显示"生成中…"并禁用，避免重复提交。
+      // （"停止生成"在页面顶部固定操作条，此处不重复提供）
+      if (this.loading) {
+        Button(this.t('gen.loading'))
+          .fontFamily(AppFonts.family())
+          .fontSize(15)
+          .width('100%')
+          .height(44)
+          .fontColor('#FFFFFF')
+          .backgroundColor('#9AA7B5')
+          .enabled(false)
+      } else if (this.result !== '') {
         // 生成完成：主按钮切换为"重新生成"与"跳转至课件大纲生成"
         Row({ space: 10 }) {
           Button(this.t('act.regen'))
@@ -524,8 +548,10 @@ export struct PlanContent {
             .width('100%')
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
           }
-          // 深度思考过程：生成中实时滚动；完成后自动折叠
-          if (this.thinkText !== '') {
+          // 深度思考过程：生成中实时滚动；完成后自动折叠。
+          // 条件用 thinkExpected（本次预期有思考过程）而非 thinkText !== ''，
+          // 否则思考增量尚未到达时思考框不会出现，用户会看到"直接跳到正文生成"。
+          if (this.thinkExpected) {
             ThinkPanel({
               text: this.thinkText,
               expanded: $thinkExpanded,
