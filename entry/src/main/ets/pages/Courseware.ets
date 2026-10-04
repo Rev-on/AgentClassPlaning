@@ -21,6 +21,8 @@ import { PageHeader } from '../common/components/PageHeader';
 import { ResultPanel } from '../common/components/ResultPanel';
 import { PptxExporter } from '../common/PptxExporter';
 import { SafeInsets } from '../common/SafeInsets';
+import { LiveView } from '../common/LiveView';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出 */
 const ResultTopPadding: number = 12;
@@ -198,6 +200,10 @@ export struct CoursewareContent {
     this.thinkExpected = AppStorage.get<boolean>(AppSettings.KEY_THINK) === true;
     // 开始新的生成：清除旧草稿，避免旧结果回魂；同时清理上一轮临时多页文件
     PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
+    // 实况窗：生成开始即创建，之后随进度更新百分比（失败静默，不影响生成）
+    LiveView.start('courseware', this.t('page.courseware')).catch((e: Error) => {
+      hilog.warn(0x0000, 'Courseware', 'LiveView.start 异常: %{public}s', e.message);
+    });
     PptxExporter.clearCoursewarePages(getContext(this) as common.UIAbilityContext);
     let user: string = '';
     if (importText !== '') {
@@ -217,6 +223,10 @@ export struct CoursewareContent {
         }
         // 生成中不逐步覆盖 result（仅完成后一次性展示完整预览）
         void partial;
+        // 实况窗：课件不逐步展示正文，但可用已生成长度驱动进度
+        LiveView.onLength(partial.length).catch((e: Error) => {
+          hilog.warn(0x0000, 'Courseware', 'LiveView.onLength 异常: %{public}s', e.message);
+        });
       }, true, {
         ctx: getContext(this) as common.UIAbilityContext,
         type: 'courseware',
@@ -227,6 +237,10 @@ export struct CoursewareContent {
       }, (think: string): void => {
         // 思考过程实时更新（服务端按"当前全文"语义回传，直接覆盖即可）
         this.thinkText = think;
+        // 实况窗：思考阶段推进基准进度
+        LiveView.onThinking().catch((e: Error) => {
+          hilog.warn(0x0000, 'Courseware', 'LiveView.onThinking 异常: %{public}s', e.message);
+        });
       });
       if (this.stopRequested) {
         // 用户主动停止：保留已生成的部分文本，不覆盖、不入历史
@@ -248,6 +262,10 @@ export struct CoursewareContent {
       // 思考框随生成态结束而收起；若本次确实产生了思考内容，
       // 完成态视图会按 thinkText !== '' 继续展示（可点击标题展开）
       this.thinkExpected = false;
+      // 实况窗：生成结束（完成/失败/停止）即结束，避免残留
+      LiveView.done().catch((e: Error) => {
+        hilog.warn(0x0000, 'Courseware', 'LiveView.done 异常: %{public}s', e.message);
+      });
       // 生成结束（完成/失败/停止）：思考过程自动折叠，用户点击标题可展开查看
           this.thinkExpanded = false;
           // 生成完成后自动下滑定位到结果预览，仅留预览顶部操作按钮
@@ -310,6 +328,10 @@ export struct CoursewareContent {
               .layoutWeight(1)
               .height(42)
               .onChange((v: string) => { this.subject = v; })
+              .backgroundColor(this.col('inputBg'))
+              .placeholderColor(this.col('hint'))
+              .caretColor('#4A90D9')
+              .borderRadius(10)
           }
           .width('100%')
           Row({ space: 10 }) {
@@ -320,6 +342,10 @@ export struct CoursewareContent {
               .layoutWeight(1)
               .height(42)
               .onChange((v: string) => { this.grade = v; })
+              .backgroundColor(this.col('inputBg'))
+              .placeholderColor(this.col('hint'))
+              .caretColor('#4A90D9')
+              .borderRadius(10)
           }
           .width('100%')
           Row({ space: 10 }) {
@@ -330,6 +356,10 @@ export struct CoursewareContent {
               .layoutWeight(1)
               .height(42)
               .onChange((v: string) => { this.topic = v; })
+              .backgroundColor(this.col('inputBg'))
+              .placeholderColor(this.col('hint'))
+              .caretColor('#4A90D9')
+              .borderRadius(10)
           }
           .width('100%')
           Row({ space: 10 }) {
@@ -340,6 +370,10 @@ export struct CoursewareContent {
               .layoutWeight(1)
               .height(42)
             .onChange((v: string) => { this.usage = v; })
+              .backgroundColor(this.col('inputBg'))
+              .placeholderColor(this.col('hint'))
+              .caretColor('#4A90D9')
+              .borderRadius(10)
           }
           .width('100%')
           // 备注（支持语音输入：点击麦克风切换"按住说话"，松手发送，上滑取消）

@@ -15,6 +15,14 @@
 /keys
 /keys/
 
+# 华为 AGC 凭据（含私钥，严禁提交）
+#  - *private.json           服务账号密钥（含 private_key）
+#  - agc-apiclient-*.json    OAuth 客户端凭据（含 client_secret）
+#  - agconnect-services.json 客户端配置（含 api_key / client_secret）
+*private.json
+agc-apiclient-*.json
+agconnect-services.json
+
 # 依赖目录（任意层级，含 Windows/、server/ 等子项目）
 node_modules/
 

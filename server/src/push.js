@@ -83,7 +83,16 @@ async function sendAlert({ token, notifyId, title, body, data }) {
   const payload = {
     payload: {
       notification: {
-        category: process.env.AGC_PUSH_CATEGORY || 'MARKETING',
+        // 通知分类。华为把通知分为「服务/通讯」与「资讯营销」两类：
+        // MARKETING 属营销类，用户可整体关闭营销通知而收不到；
+        // 本应用的通知是**用户主动发起的生成任务已完成**，属功能/服务提醒，
+        // 故默认使用 WORK。
+        // 合法取值（用华为推送接口实测确认，返回 80000000）：
+        //   MARKETING, IM, VOIP, SUBSCRIPTION, TRAVEL, HEALTH, WORK,
+        //   ACCOUNT, EXPRESS, FINANCE, DEVICE_REMINDER, MAIL, NEWS
+        // 非法取值（返回 80100003 invalid category）：
+        //   TODO, LOCATION, SOCIAL, RECOMMEND, SERVICE, PLAY_VOICE
+        category: process.env.AGC_PUSH_CATEGORY || 'WORK',
         title: String(title || ''),
         body: String(body || ''),
         clickAction: { actionType: 0, data: data || {} },

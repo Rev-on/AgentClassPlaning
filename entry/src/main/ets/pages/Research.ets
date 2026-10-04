@@ -21,6 +21,8 @@ import { ResultPanel } from '../common/components/ResultPanel';
 import { RichBox } from '../common/components/RichBox';
 import { RichHtml } from '../common/RichHtml';
 import { SafeInsets } from '../common/SafeInsets';
+import { LiveView } from '../common/LiveView';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出 */
 const ResultTopPadding: number = 12;
@@ -210,6 +212,10 @@ export struct ResearchContent {
     this.thinkExpected = AppStorage.get<boolean>(AppSettings.KEY_THINK) === true;
     // 开始新的生成：清除旧草稿，避免旧结果回魂
     PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
+    // 实况窗：生成开始即创建，之后随进度更新百分比（失败静默，不影响生成）
+    LiveView.start('research', this.t('page.research')).catch((e: Error) => {
+      hilog.warn(0x0000, 'Research', 'LiveView.start 异常: %{public}s', e.message);
+    });
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
     try {
       const content: string = await AiService.chat(this.systemPrompt(), this.input + remarkPart, (partial: string) => {
@@ -219,6 +225,10 @@ export struct ResearchContent {
           this.thinkExpanded = false;
         }
         this.result = partial;
+        // 实况窗：随正文进度更新百分比
+        LiveView.onContent(partial).catch((e: Error) => {
+          hilog.warn(0x0000, 'Research', 'LiveView.onContent 异常: %{public}s', e.message);
+        });
         this.scrollLiveToBottom();
       }, false, {
         ctx: getContext(this) as common.UIAbilityContext,
@@ -230,6 +240,10 @@ export struct ResearchContent {
       }, (think: string): void => {
         // 思考过程实时更新（服务端按"当前全文"语义回传，直接覆盖即可）
         this.thinkText = think;
+        // 实况窗：思考阶段推进基准进度
+        LiveView.onThinking().catch((e: Error) => {
+          hilog.warn(0x0000, 'Research', 'LiveView.onThinking 异常: %{public}s', e.message);
+        });
       });
       if (this.stopRequested) {
         // 用户主动停止：保留已生成的部分文本，不覆盖、不入历史
@@ -248,6 +262,10 @@ export struct ResearchContent {
       // 思考框随生成态结束而收起；若本次确实产生了思考内容，
       // 完成态视图会按 thinkText !== '' 继续展示（可点击标题展开）
       this.thinkExpected = false;
+      // 实况窗：生成结束（完成/失败/停止）即结束，避免残留
+      LiveView.done().catch((e: Error) => {
+        hilog.warn(0x0000, 'Research', 'LiveView.done 异常: %{public}s', e.message);
+      });
       // 生成结束（完成/失败/停止）：思考过程自动折叠，用户点击标题可展开查看
           this.thinkExpanded = false;
           // 生成完成后自动下滑定位到结果预览，仅留预览顶部操作按钮
@@ -344,6 +362,10 @@ export struct ResearchContent {
             .height(120)
             .fontSize(15)
             .onChange((v: string) => { this.input = v; })
+            .backgroundColor(this.col('inputBg'))
+            .placeholderColor(this.col('hint'))
+            .caretColor('#4A90D9')
+            .borderRadius(10)
 
           // 备注（支持语音输入：点击麦克风切换"按住说话"，松手发送，上滑取消）
           VoiceRemarkBox({

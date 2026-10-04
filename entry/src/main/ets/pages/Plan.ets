@@ -21,6 +21,8 @@ import { AppSettings } from '../common/AppSettings';
 import { AttachFile } from '../common/AttachTypes';
 import { RichHtml } from '../common/RichHtml';
 import { SafeInsets } from '../common/SafeInsets';
+import { LiveView } from '../common/LiveView';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出，不被固定标题栏压住 */
 const ResultTopPadding: number = 12;
@@ -204,6 +206,10 @@ export struct PlanContent {
     this.thinkExpected = AppStorage.get<boolean>(AppSettings.KEY_THINK) === true;
     // 开始新的生成：清除旧草稿，避免旧结果回魂
     PageDraft.clear(getContext(this) as common.UIAbilityContext, this.genKey());
+    // 实况窗：生成开始即创建，之后随进度更新百分比（失败静默，不影响生成）
+    LiveView.start('plan', this.t('page.plan')).catch((e: Error) => {
+      hilog.warn(0x0000, 'Plan', 'LiveView.start 异常: %{public}s', e.message);
+    });
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
     const user: string = `学科：${this.subject}\n教材版本：${this.version}\n年级：${this.grade}\n课题：${this.topic}\n课时：${this.period}\n\n请生成该课题的完整教案。${remarkPart}`;
     try {
@@ -218,6 +224,10 @@ export struct PlanContent {
           this.liveExpanded = true;
         }
         this.result = partial;
+        // 实况窗：随正文进度更新百分比
+        LiveView.onContent(partial).catch((e: Error) => {
+          hilog.warn(0x0000, 'Plan', 'LiveView.onContent 异常: %{public}s', e.message);
+        });
         this.scrollLiveToBottom();
       }, false, {
         ctx: getContext(this) as common.UIAbilityContext,
@@ -229,6 +239,10 @@ export struct PlanContent {
       }, (think: string): void => {
         // 思考过程实时更新（服务端按"当前全文"语义回传，直接覆盖即可）
         this.thinkText = think;
+        // 实况窗：思考阶段推进基准进度
+        LiveView.onThinking().catch((e: Error) => {
+          hilog.warn(0x0000, 'Plan', 'LiveView.onThinking 异常: %{public}s', e.message);
+        });
       });
       if (this.stopRequested) {
         // 用户主动停止：保留已生成的部分文本，不覆盖、不入历史
@@ -249,6 +263,10 @@ export struct PlanContent {
       // 思考框随生成态结束而收起；若本次确实产生了思考内容，
       // 完成态视图会按 thinkText !== '' 继续展示（可点击标题展开）
       this.thinkExpected = false;
+      // 实况窗：生成结束（完成/失败/停止）即结束，避免残留
+      LiveView.done().catch((e: Error) => {
+        hilog.warn(0x0000, 'Plan', 'LiveView.done 异常: %{public}s', e.message);
+      });
       // 生成完成后自动上滑到结果预览顶部，让顶部操作按钮露出。
       // 分两步：先等一帧让"生成态→完成态"的布局切换（预览框重建为整页滚动）完成，
       // 再等一帧读取 onAreaChange 记录到的坐标，避免用旧坐标滚动导致定位偏差。
@@ -342,6 +360,10 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.subject = v; })
+            .backgroundColor(this.col('inputBg'))
+            .placeholderColor(this.col('hint'))
+            .caretColor('#4A90D9')
+            .borderRadius(10)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -352,6 +374,10 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.version = v; })
+            .backgroundColor(this.col('inputBg'))
+            .placeholderColor(this.col('hint'))
+            .caretColor('#4A90D9')
+            .borderRadius(10)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -362,6 +388,10 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.grade = v; })
+            .backgroundColor(this.col('inputBg'))
+            .placeholderColor(this.col('hint'))
+            .caretColor('#4A90D9')
+            .borderRadius(10)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -372,6 +402,10 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.topic = v; })
+            .backgroundColor(this.col('inputBg'))
+            .placeholderColor(this.col('hint'))
+            .caretColor('#4A90D9')
+            .borderRadius(10)
         }
         .width('100%')
         Row({ space: 10 }) {
@@ -382,6 +416,10 @@ export struct PlanContent {
             .layoutWeight(1)
             .height(42)
             .onChange((v: string) => { this.period = v; })
+            .backgroundColor(this.col('inputBg'))
+            .placeholderColor(this.col('hint'))
+            .caretColor('#4A90D9')
+            .borderRadius(10)
         }
         .width('100%')
         // 备注（支持语音输入：点击麦克风切换"按住说话"，松手发送，上滑取消）
