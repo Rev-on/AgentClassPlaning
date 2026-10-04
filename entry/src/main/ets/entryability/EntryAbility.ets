@@ -117,10 +117,12 @@ export default class EntryAbility extends UIAbility {
     notificationManager.isNotificationEnabled().then((enabled: boolean) => {
       hilog.info(DOMAIN, 'testTag', '通知权限当前状态: %{public}s', enabled ? '已开启' : '未开启');
       if (enabled) {
+        this.publishNotifyDiag();
         return;
       }
       notificationManager.requestEnableNotification(ctx).then(() => {
         hilog.info(DOMAIN, 'testTag', '通知权限申请成功');
+        this.publishNotifyDiag();
       }).catch((err: BusinessError) => {
         // 1600004 = 用户已拒绝过，系统不再弹窗；需引导用户到设置里手动开启
         hilog.warn(DOMAIN, 'testTag', '通知权限申请失败 code=%{public}d %{public}s',
@@ -128,6 +130,51 @@ export default class EntryAbility extends UIAbility {
       });
     }).catch((err: BusinessError) => {
       hilog.warn(DOMAIN, 'testTag', 'isNotificationEnabled 失败 code=%{public}d %{public}s',
+        err.code, err.message);
+    });
+  }
+
+  /**
+   * 发布一条**本地通知**（不经过推送服务）。
+   *
+   * 用于自检：验证设备通知功能（含响铃与横幅）是否正常。
+   *
+   * 响铃 + 横幅的关键：
+   *   通知的"是否有提示音/横幅"由**通知渠道（Slot）的 level** 决定，
+   *   而不是由 NotificationRequest 本身的字段决定：
+   *     LEVEL_LOW(2)     状态栏图标，无提示音、无横幅
+   *     LEVEL_DEFAULT(3) 状态栏图标 + 提示音，无横幅
+   *     LEVEL_HIGH(4)    状态栏图标 + 提示音 + 横幅   ← 需要这个
+   *   因此先 addSlot 建一个 LEVEL_HIGH 的渠道，再指定 slotType 发布。
+   *   （渠道一旦创建，其 level 由用户在系统设置中最终掌控。）
+   */
+  private publishNotifyDiag(): void {
+    const slotType: notificationManager.SlotType = notificationManager.SlotType.SOCIAL_COMMUNICATION;
+    notificationManager.addSlot(slotType).then(() => {
+      hilog.info(DOMAIN, 'testTag', '[NotifyDiag] 通知渠道已就绪');
+    }).catch((err: BusinessError) => {
+      // 渠道已存在时会失败，属正常情况，忽略
+      hilog.info(DOMAIN, 'testTag', '[NotifyDiag] addSlot 返回 code=%{public}d（已存在可忽略）', err.code);
+    });
+
+    const req: notificationManager.NotificationRequest = {
+      id: 99001,
+      // 注意：用 notificationSlotType，而不是已废弃的 slotType（API 11 起弃用）
+      notificationSlotType: slotType,
+      // 点击后自动消失
+      tapDismissed: true,
+      content: {
+        notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+        normal: {
+          title: '本地通知自检',
+          text: '看到这条说明通知功能正常（含响铃与横幅）'
+        }
+      }
+    };
+    notificationManager.publish(req).then(() => {
+      hilog.info(DOMAIN, 'testTag', '[NotifyDiag] 本地通知已发布，请查看通知栏');
+    }).catch((err: BusinessError) => {
+      hilog.error(DOMAIN, 'testTag', '[NotifyDiag] 本地通知发布失败 code=%{public}d %{public}s',
         err.code, err.message);
     });
   }

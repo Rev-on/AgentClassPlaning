@@ -31,6 +31,24 @@ export struct RichBox {
   private static readonly INK_DARK: string = '#E7EAF0';
   private static readonly PAPER_DARK: string = '#1C222C';
 
+  /**
+   * 解析结果缓存（**仅按源串整串命中**）。
+   *
+   * 为什么需要：
+   *   原实现把 blocks() 直接写在 build() 的 ForEach 里，而 build() 在**每个流式
+   *   分片**都会重跑 —— 于是每次都要把"当前已生成的全部 HTML"从头解析一遍。
+   *
+   * 为什么不做"按段落增量解析"：
+   *   曾尝试只解析新增尾部、复用已稳定段落，但**语义不正确**：
+   *   段落边界依赖跨行的 HTML 上下文（如 `<b>` 跨行、上一行末尾的样式延续），
+   *   从 `\n` 之后单独解析尾部会得到与整串解析不同的分块结果
+   *   （实测：`## 一、教材分析\n本` 会被错拆成两块）。
+   *   因此这里只做"整串未变则复用"的安全缓存；只要 AppStorage/Prop 触发的是
+   *   同值重渲染（排版、主题、滚动等引发的 rebuild），就能省掉重复解析。
+   */
+  private cachedSrc: string = '';
+  private cachedBlocks: PreviewBlock[] = [];
+
   /** 主题是否为深色 */
   private isDark(): boolean {
     return this.resolvedTheme === 'dark';
@@ -46,9 +64,26 @@ export struct RichBox {
     return this.isDark() ? RichBox.PAPER_DARK : this.paper;
   }
 
-  /** 解析为"标题/段落"块序列（按换行切段） */
+  /**
+   * 解析为"标题/段落"块序列（按换行切段）。
+   *
+   * 带整串缓存：源串未变时直接复用上次结果，避免同值重渲染重复解析。
+   * （不做段落级增量，原因见 cachedSrc 注释 —— 那样会破坏跨行语义。）
+   */
   private blocks(): PreviewBlock[] {
-    const runs: RichRun[] = RichHtml.htmlToRuns(this.html);
+    const src: string = this.html;
+    if (src === this.cachedSrc) {
+      return this.cachedBlocks;
+    }
+    const out: PreviewBlock[] = RichBox.parseBlocks(src);
+    this.cachedSrc = src;
+    this.cachedBlocks = out;
+    return out;
+  }
+
+  /** 把整段 HTML 解析为块序列（纯函数） */
+  private static parseBlocks(html: string): PreviewBlock[] {
+    const runs: RichRun[] = RichHtml.htmlToRuns(html);
     const out: PreviewBlock[] = [];
     let cur: RichRun[] = [];
     const push = (): void => {
@@ -126,11 +161,20 @@ export struct RichBox {
                     type: r.strike ? TextDecorationType.LineThrough
                       : (r.underline ? TextDecorationType.Underline : TextDecorationType.None)
                   })
-              }, (r: RichRun, idx: number) => idx.toString() + '_' + r.text)
+                // key 只用下标 + 样式标记，**不含文本**：
+                //   流式追加时最后一段文本每片都在变，若 key 含文本会导致
+                //   该 Span 每片都被判定为"新节点"而销毁重建，既闪烁又慢。
+                //   下标+样式已能唯一标识该项，文本变化由框架原地更新。
+              }, (r: RichRun, idx: number) => idx.toString()
+                + (r.bold ? 'b' : '') + (r.italic ? 'i' : '')
+                + (r.underline ? 'u' : '') + (r.strike ? 's' : '')
+                + (r.color !== '' ? r.color : '') + '_' + r.size.toString())
             }
             .width('100%')
             .lineHeight(this.bodySize + 7)
           }
+        // 段落 key 同样去掉易变内容：仅用下标 + 标题级别。
+        // 段落的 text 增长由框架更新，不需要重建整个段落节点。
         }, (b: PreviewBlock, i: number) => i.toString() + '_' + b.heading.toString())
       }
     }

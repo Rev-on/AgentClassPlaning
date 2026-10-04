@@ -22,6 +22,7 @@ import { AttachFile } from '../common/AttachTypes';
 import { RichHtml } from '../common/RichHtml';
 import { SafeInsets } from '../common/SafeInsets';
 import { LiveView } from '../common/LiveView';
+import { StreamThrottle } from '../common/StreamThrottle';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出，不被固定标题栏压住 */
@@ -53,6 +54,14 @@ export struct PlanContent {
    */
   @State thinkExpected: boolean = false;
   @State result: string = '';
+  /**
+   * 流式渲染节流：SSE 分片率远高于屏幕刷新率，
+   * 直接每次赋值会触发大量无谓 rebuild（分片落在同一帧内纯属白做）。
+   * 这里按固定间隔合并提交最新文本，结束时 flush 保证最终内容不丢。
+   */
+  private resultThrottle: StreamThrottle = new StreamThrottle((v: string): void => {
+    this.result = v;
+  });
   /**
    * 生成中是否已把输入卡片收起（让预览框"扩大"占满可视区）。
    * 首个正文字块到达后置 true：此时用户关注的是正在生成的正文而非输入项。
@@ -223,7 +232,7 @@ export struct PlanContent {
         if (!this.liveExpanded) {
           this.liveExpanded = true;
         }
-        this.result = partial;
+        this.resultThrottle.push(partial);
         // 实况窗：随正文进度更新百分比
         LiveView.onContent(partial).catch((e: Error) => {
           hilog.warn(0x0000, 'Plan', 'LiveView.onContent 异常: %{public}s', e.message);
@@ -247,6 +256,8 @@ export struct PlanContent {
       if (this.stopRequested) {
         // 用户主动停止：保留已生成的部分文本，不覆盖、不入历史
         this.stopRequested = false;
+        // 停止时也要把节流里最后一片补上，否则末尾内容会缺失
+        this.resultThrottle.flush();
         return;
       }
       this.result = content;
@@ -255,7 +266,13 @@ export struct PlanContent {
       PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), content);
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
+      // 失败路径：把节流里已收到的部分内容补上，避免已生成内容不显示
+      this.resultThrottle.flush();
     } finally {
+      // 丢弃未提交的中间态并复位：
+      // 成功路径已由 this.result = content 写入权威完整内容，
+      // 此处**绝不能**再 flush —— 否则会用滞后的 partial 覆盖完整结果。
+      this.resultThrottle.cancel();
       this.loading = false;
       this.thinkRunning = false;
       // 生成结束（完成/失败/停止）：思考过程自动折叠，用户点击标题可展开查看

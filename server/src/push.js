@@ -93,6 +93,13 @@ async function sendAlert({ token, notifyId, title, body, data }) {
         // 非法取值（返回 80100003 invalid category）：
         //   TODO, LOCATION, SOCIAL, RECOMMEND, SERVICE, PLAY_VOICE
         category: process.env.AGC_PUSH_CATEGORY || 'WORK',
+        // 通知渠道类型：决定是否有提示音与横幅。
+        //   1 = SOCIAL_COMMUNICATION（社交通讯，级别最高：提示音 + 横幅）
+        //   2 = SERVICE_INFORMATION（服务提醒）
+        //   3 = CONTENT_INFORMATION（内容资讯，通常静默无提示音）
+        // 生成完成属用户主动发起的任务结果，默认用 2；
+        // 若希望更醒目（响铃 + 横幅）可设为 1。
+        slotType: Number(process.env.AGC_PUSH_SLOT_TYPE || 2),
         title: String(title || ''),
         body: String(body || ''),
         clickAction: { actionType: 0, data: data || {} },
