@@ -94,16 +94,32 @@ async function sendAlert({ token, notifyId, title, body, data }) {
         //   TODO, LOCATION, SOCIAL, RECOMMEND, SERVICE, PLAY_VOICE
         category: process.env.AGC_PUSH_CATEGORY || 'WORK',
         // 通知渠道类型：决定是否有提示音与横幅。
-        //   1 = SOCIAL_COMMUNICATION（社交通讯，级别最高：提示音 + 横幅）
-        //   2 = SERVICE_INFORMATION（服务提醒）
-        //   3 = CONTENT_INFORMATION（内容资讯，通常静默无提示音）
-        // 生成完成属用户主动发起的任务结果，默认用 2；
-        // 若希望更醒目（响铃 + 横幅）可设为 1。
-        slotType: Number(process.env.AGC_PUSH_SLOT_TYPE || 2),
+        //
+        // ⚠️ 重要：这里的数字必须与**客户端已注册的通知渠道**对应，
+        //    只设这里而客户端没注册渠道是无效的（会落到默认低级别渠道，
+        //    表现为"能收到通知但不响铃、无横幅"）。
+        //    客户端注册逻辑见 entry/src/main/ets/common/NotifySlot.ets。
+        //
+        // 取值与客户端 SlotType 常量一一对应（以 OpenHarmony 官方 d.ts 为准）：
+        //   0 = UNKNOWN_TYPE          未知（LEVEL_MIN，静默）
+        //   1 = SOCIAL_COMMUNICATION  社交通信，默认 LEVEL_HIGH → 横幅 + 提示音
+        //   2 = SERVICE_INFORMATION   服务提醒，默认 LEVEL_HIGH
+        //   3 = CONTENT_INFORMATION   内容资讯，默认 LEVEL_MIN（静默）
+        //   4 = LIVE_VIEW             实况窗
+        //   5 = CUSTOMER_SERVICE      客服消息
+        //
+        // 本应用默认用 1：生成完成通知要**响铃 + 弹横幅**，
+        // 且客户端已注册 SOCIAL_COMMUNICATION 渠道（NotifySlot.ets）。
+        slotType: Number(process.env.AGC_PUSH_SLOT_TYPE || 1),
         title: String(title || ''),
         body: String(body || ''),
         clickAction: { actionType: 0, data: data || {} },
-        foregroundShow: false, // 前台不展示，避免与页面内展示重复；后台/杀进程时展示
+        // 前台是否展示通知。
+        //   默认 false：华为设计如此 —— App 在前台时系统不弹通知，避免与页面内
+        //   展示重复（本应用前台已有实况窗 + 结果面板显示进度）。
+        //   副作用：**前台测试时永远收不到通知**，容易被误判为"推送不工作"。
+        //   可用 AGC_PUSH_FOREGROUND_SHOW=true 打开，便于前台联调验证链路是否通。
+        foregroundShow: process.env.AGC_PUSH_FOREGROUND_SHOW === 'true',
         notifyId: Number(notifyId || 0)
       }
     },
@@ -124,12 +140,40 @@ async function sendAlert({ token, notifyId, title, body, data }) {
       body: JSON.stringify(payload)
     });
     const text = await resp.text();
-    if (resp.ok) {
-      console.log('[push] 完成通知已发送 code=' + resp.status + ' body=' + text.slice(0, 200));
-      return { ok: true };
+    // 关键：华为**即使业务失败也返回 HTTP 200**，真正的结果在响应体的 code 字段。
+    // 早前只看 resp.ok 判断成败，导致 code=80300007（token 无效）被误判为"发送成功"，
+    // 失效 token 因此一直得不到清理。必须解析 body.code。
+    let code = '';
+    let illegal = [];
+    try {
+      const j = JSON.parse(text);
+      code = String(j.code || '');
+      // 80300007：token 格式错误/已失效，msg 里带 illegalTokens 明细
+      if (j.msg) {
+        try {
+          const inner = JSON.parse(j.msg);
+          if (inner && inner.illegalTokens) {
+            Object.keys(inner.illegalTokens).forEach((k) => {
+              (inner.illegalTokens[k] || []).forEach((t) => illegal.push(t));
+            });
+          }
+        } catch (e2) {
+          // msg 非 JSON：忽略
+        }
+      }
+    } catch (e) {
+      // 响应体非 JSON
     }
-    console.error('[push] 发送失败 code=' + resp.status + ' body=' + text.slice(0, 300));
-    return { ok: false, status: resp.status, body: text.slice(0, 300) };
+
+    if (code === '80000000') {
+      console.log('[push] 完成通知已发送（华为已受理）');
+      return { ok: true, code };
+    }
+
+    console.error('[push] 发送失败 httpCode=' + resp.status + ' code=' + code
+      + ' body=' + text.slice(0, 300));
+    // 把失效 token 一并抛出，交由调用方清理
+    return { ok: false, code, status: resp.status, illegalTokens: illegal, body: text.slice(0, 300) };
   } catch (e) {
     console.error('[push] 发送异常: ' + (e && e.message ? e.message : String(e)));
     return { ok: false };

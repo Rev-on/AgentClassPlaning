@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Rev TechingMaster</title>
+<title>Agent备课</title>
 <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
@@ -12,7 +12,7 @@
     <aside id="leftPane" class="left-pane">
       <div class="pane-head">
         <div class="pane-title" id="paneTitle">备课助手</div>
-        <div class="pane-brand">Rev TechingMaster</div>
+        <div class="pane-brand">Agent备课</div>
       </div>
       <div class="pane-grid-wrap" id="gridWrap"></div>
       <div class="tabbar" id="tabbar">
@@ -26,9 +26,11 @@
   </div>
   <div id="toast" class="toast" role="status"></div>
   <div id="modalRoot"></div>
+  <!-- 加载顺序不可颠倒：notify-core 定义 window.RTMNotify，须先于 js/app.js -->
   <script src="js/vendor/jszip.min.js"></script>
   <script src="js/i18n-data.js"></script>
   <script src="js/office.js"></script>
+  <script src="js/notify-core.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

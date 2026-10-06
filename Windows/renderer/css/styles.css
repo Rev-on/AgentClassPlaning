@@ -166,10 +166,26 @@ body {
 .btn-success { background: var(--success); }
 .btn-danger { background: #FDE8E8; color: var(--danger); }
 .btn-ghost { background: var(--head-bg); color: var(--sub); }
+/* "停止生成"：生成中由 btn-primary 切换到此样式，用红色以区别于"开始" */
+.btn-stop { background: var(--danger); color: #fff; }
+.btn-stop:hover { filter: brightness(1.06); }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 
 .hint { font-size: 12px; color: var(--hint); line-height: 1.6; margin-top: 8px; }
 .hint-err { color: var(--danger); }
+/* 截断提示：介于"提示"与"错误"之间——内容已生成但不完整 */
+.hint-warn {
+  font-size: 12px;
+  line-height: 1.7;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #FFF7E6;
+  border: 1px solid #FFE0A3;
+  color: #8A5A00;
+}
+/* 深色主题：应用用的是 root 上的 .theme-dark 类（见 app.js 的 applyTheme） */
+.theme-dark .hint-warn { background: #3A2E14; border-color: #5C4A1E; color: #F0C674; }
 
 /* 结果区 */
 .result-box {

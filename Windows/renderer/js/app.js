@@ -1,13 +1,29 @@
 /* ============================================================
  * Rev TechingMaster Windows 版（Electron renderer）
  * 界面与鸿蒙平板版一致：左侧 400px 手机式三 Tab 面板 + 右侧工具页
- * 依赖 js/i18n-data.js（五语言词典，源自鸿蒙工程）
+ *
+ * 依赖（加载顺序，见 renderer/index.html）：
+ *   js/vendor/jszip.min.js → js/i18n-data.js（五语言词典，源自鸿蒙工程）
+ *   → js/office.js → js/notify-core.js（通知核心，可选）
+ *   → js/app.js（本文件）
+ *
+ * notify-core.js 提供 window.RTMNotify（逐功能固定通知 id + 文案拼装）。
+ * 它是**可选**依赖：缺失时本文件用内置的同逻辑实现兜底并只告警一次，
+ * 既不抛错也不会白屏 —— 通知本身是增强项（与鸿蒙 NotifySlot/EntryAbility
+ * "通知失败绝不影响启动"的策略一致）。
  * ============================================================ */
 (function () {
   'use strict';
 
   var $ = function (s) { return document.querySelector(s); };
   var DICTS = (window.I18N_DATA || {});
+  /** 通知核心（可选）：存在则优先复用，保证与 Node 单测覆盖的是同一份逻辑 */
+  var CORE = (window.RTMNotify && typeof window.RTMNotify === 'object') ? window.RTMNotify : null;
+  if (!CORE) {
+    try {
+      console.warn('[notify] 未加载 js/notify-core.js，已启用内置兜底实现（功能等价，但不参与单测覆盖）');
+    } catch (e) { /* 控制台不可用：忽略 */ }
+  }
 
   /* ---------- 词典缺失补充（zh/en，少数民族缺键自动回退中文） ---------- */
   var EXTRA = {
@@ -25,6 +41,13 @@
       'think.expand': '展开', 'think.collapse': '收起',
       'btn.export': '导出', 'btn.exportWord': '导出 Word', 'btn.exportPpt': '导出 PPT',
       'btn.saveBack': '保存回班级', 'btn.import': '导入名单', 'btn.rename': '重命名',
+      /* 停止生成 + 截断提示 */
+      'btn.stop': '停止生成',
+      'toast.stopped': '已停止生成（已保留生成到一半的内容）',
+      'err.truncated': '输出达到长度上限，内容可能不完整',
+      'err.truncatedHint': '⚠️ 输出被长度上限截断（深度思考会占用同一额度）。'
+        + '可关闭"深度思考"后重新生成，或对已生成内容手动补充；'
+        + '课件等长文建议分段生成。',
       'toast.exported': '已导出成功', 'toast.imported': '已导入 {n} 条',
       'toast.classSaved': '已保存到班级', 'toast.swapped': '已互换座位',
       'hist.export': '导出', 'hist.exportTitle': '导出为 Word',
@@ -41,7 +64,19 @@
       'disclaimer.accept': '同意并继续', 'disclaimer.decline': '不同意',
       'disclaimer.countdown': '{n} 秒后可继续',
       'md.bold': '加粗', 'md.italic': '斜体', 'md.underline': '下划线',
-      'md.strike': '删除线', 'md.color': '文字颜色', 'md.editHint': '生成后可在此直接编辑，点击/框选文字后用工具栏设置格式'
+      'md.strike': '删除线', 'md.color': '文字颜色', 'md.editHint': '生成后可在此直接编辑，点击/框选文字后用工具栏设置格式',
+      /* 通知文案（源真值：鸿蒙 I18n.ets 的 notify.* 家族）。
+       * 正常由 i18n-data.js 提供；此处作为词典缺失时的安全兜底。 */
+      'notify.done.title': '生成完成',
+      'notify.done.body.a': '「', 'notify.done.body.b': '」已生成完成，点击查看',
+      'notify.fail.title': '生成失败',
+      'notify.fail.body.a': '「', 'notify.fail.body.b': '」生成失败，点击重试',
+      'notify.runningTitle': '{type}生成中',
+      'notify.runningText': '正在后台为您生成，完成后将收到通知',
+      'notify.doneTitle': '{type}已生成完成',
+      'notify.doneBody': '您的{type}已生成完成，点击查看',
+      'notify.failTitle': '{type}生成失败',
+      'notify.failBody': '您的{type}生成失败，请返回重新生成'
     },
     en: {
       'f.mode': 'Mode', 'f.researchTopic': 'Research topic / teaching pain point',
@@ -57,6 +92,13 @@
       'think.expand': 'Expand', 'think.collapse': 'Collapse',
       'btn.export': 'Export', 'btn.exportWord': 'Export Word', 'btn.exportPpt': 'Export PPT',
       'btn.saveBack': 'Save to class', 'btn.import': 'Import roster', 'btn.rename': 'Rename',
+      /* stop generation + truncation notice */
+      'btn.stop': 'Stop',
+      'toast.stopped': 'Generation stopped (partial content kept)',
+      'err.truncated': 'Output hit the length limit; content may be incomplete',
+      'err.truncatedHint': '⚠️ The output was cut off by the length limit '
+        + '(deep thinking shares the same budget). Turn off "Deep Thinking" and retry, '
+        + 'or extend the content manually; for long items like courseware, generate in parts.',
       'toast.exported': 'Exported', 'toast.imported': 'Imported {n} items',
       'toast.classSaved': 'Saved to class', 'toast.swapped': 'Seats swapped',
       'hist.export': 'Export', 'hist.exportTitle': 'Export as Word',
@@ -73,7 +115,17 @@
       'disclaimer.accept': 'Agree & continue', 'disclaimer.decline': 'Decline',
       'disclaimer.countdown': 'Continue in {n}s',
       'md.bold': 'Bold', 'md.italic': 'Italic', 'md.underline': 'Underline',
-      'md.strike': 'Strikethrough', 'md.color': 'Text color', 'md.editHint': 'Editable after generation: select text then use the toolbar'
+      'md.strike': 'Strikethrough', 'md.color': 'Text color', 'md.editHint': 'Editable after generation: select text then use the toolbar',
+      'notify.done.title': 'Generation complete',
+      'notify.done.body.a': '"', 'notify.done.body.b': '" is ready. Tap to view.',
+      'notify.fail.title': 'Generation failed',
+      'notify.fail.body.a': '"', 'notify.fail.body.b': '" failed to generate. Tap to retry.',
+      'notify.runningTitle': '{type} generating',
+      'notify.runningText': 'Generating in background. You will be notified when done.',
+      'notify.doneTitle': '{type} is ready',
+      'notify.doneBody': 'Your {type} is ready. Tap to view.',
+      'notify.failTitle': '{type} failed',
+      'notify.failBody': 'Your {type} failed. Please go back and retry.'
     }
   };
 
@@ -107,6 +159,10 @@
     deepThink: load('deepThink', false),   // 深度思考开关（与鸿蒙端一致，localStorage 持久化）
     formVals: {},          // 工具输入缓存
     toolStates: {},        // 生成中状态
+    // ---- 停止生成相关 ----
+    abortCtrl: null,       // 当前 SSE 请求的 AbortController
+    stopped: false,        // 本次生成是否由用户主动停止
+    lastStreamText: '',    // 最近一次流式正文（停止后保留已生成的部分）
     history: load('history', []),
     classes: load('classes', [])
   };
@@ -149,6 +205,83 @@
     if (z[key] !== undefined) return z[key];
     var e = EXTRA.zh[key];
     return e !== undefined ? e : key;
+  }
+
+  /* ---------- 通知文案兜底链 ----------
+   * notify.* 点号键由 i18n 队友从 I18n.ets 移植进 i18n-data.js。
+   * 关键：ug/bo/mn 三种语言**没有**点号键，只有 camelCase 家族
+   * （notify.doneTitle/doneBody/failTitle/failBody，自带 {type} 占位符）。
+   * 若不做区分，通知就会退化成"中文括号前缀 + 本族语功能名 + 中文后缀"的
+   * 缝合句，甚至直接显示裸 key 名 —— 这是本功能最可能被用户看到的缺陷。
+   *
+   * ⚠️ 判定"本语言有没有某键"必须查**本语言词典**，不能查 t()：
+   *    t() 带跨语言回退链，ug/bo/mn 查点号键会拿到英文值而被误判为"有"，
+   *    于是永远走不到自己的完整句式（回归测试抓到的真实缺陷）。
+   * 这与 notify-core.js 的 buildTexts + makeLookup 是同一套语义。 */
+  function ownHas(key) {
+    var v = dict(state.lang)[key];
+    return typeof v === 'string' && v !== '';
+  }
+  /** 本语言优先、再跨语言回退、最后内置 EXTRA 的查表（永不返回空） */
+  function lookNotify(key) {
+    var v = dict(state.lang)[key];
+    if (typeof v === 'string' && v !== '') return v;
+    var e = t(key);
+    if (e !== key) return e;
+    return EXTRA.zh[key] !== undefined ? EXTRA.zh[key] : key;
+  }
+  function fillType(tpl, label) {
+    return String(tpl == null ? '' : tpl).replace(/\{type\}/g, label);
+  }
+  /** 组装完成/失败/生成中三组文案（与 notify-core.buildTexts 语义等价的内置兜底） */
+  function notifyTexts(label) {
+    // 优先复用 notify-core：单一事实来源，且被 Node 回归测试覆盖；
+    // 仅在未加载 notify-core.js 时走到下面的内置实现。
+    if (CORE && typeof CORE.buildTexts === 'function') {
+      try {
+        var c = CORE.buildTexts(lookNotify, label, ownHas);
+        if (c && typeof c.doneBody === 'string' && c.doneBody) return c;
+      } catch (e) {
+        try { console.warn('[notify] notify-core 文案组装失败，回退内置实现:', e && e.message); } catch (e2) { /* ignore */ }
+      }
+    }
+    var name = String(label == null ? '' : label).trim();
+    if (name === '') name = t('card.history');
+    var dottedDone = ownHas('notify.done.title') && ownHas('notify.done.body.b');
+    var dottedFail = ownHas('notify.fail.title') && ownHas('notify.fail.body.b');
+    var doneTitle, doneBody, failTitle, failBody;
+    if (dottedDone) {
+      doneTitle = lookNotify('notify.done.title');
+      doneBody = lookNotify('notify.done.body.a') + name + lookNotify('notify.done.body.b');
+    } else if (ownHas('notify.doneTitle') && ownHas('notify.doneBody')) {
+      doneTitle = fillType(lookNotify('notify.doneTitle'), name);
+      doneBody = fillType(lookNotify('notify.doneBody'), name);
+    } else if (lookNotify('notify.doneTitle') !== 'notify.doneTitle') {
+      doneTitle = fillType(lookNotify('notify.doneTitle'), name);
+      doneBody = fillType(lookNotify('notify.doneBody'), name);
+    } else {
+      doneTitle = EXTRA.zh['notify.done.title'];
+      doneBody = EXTRA.zh['notify.done.body.a'] + name + EXTRA.zh['notify.done.body.b'];
+    }
+    if (dottedFail) {
+      failTitle = lookNotify('notify.fail.title');
+      failBody = lookNotify('notify.fail.body.a') + name + lookNotify('notify.fail.body.b');
+    } else if (ownHas('notify.failTitle') && ownHas('notify.failBody')) {
+      failTitle = fillType(lookNotify('notify.failTitle'), name);
+      failBody = fillType(lookNotify('notify.failBody'), name);
+    } else if (lookNotify('notify.failTitle') !== 'notify.failTitle') {
+      failTitle = fillType(lookNotify('notify.failTitle'), name);
+      failBody = fillType(lookNotify('notify.failBody'), name);
+    } else {
+      failTitle = EXTRA.zh['notify.fail.title'];
+      failBody = EXTRA.zh['notify.fail.body.a'] + name + EXTRA.zh['notify.fail.body.b'];
+    }
+    return {
+      doneTitle: doneTitle, doneBody: doneBody,
+      failTitle: failTitle, failBody: failBody,
+      runningTitle: fillType(lookNotify('notify.runningTitle'), name),
+      runningText: lookNotify('notify.runningText')
+    };
   }
   function langName() { return t('langName.' + state.lang); }
   function setLang(code) {
@@ -452,7 +585,11 @@
     }
     // 行内动作
     var act = function (id, fn) { var b = document.getElementById(id); if (b) b.onclick = fn; };
-    act('btnGen', function () { generateTool(en); });
+    // "AI 生成" / "停止" 同一个按钮：按当前模式分派
+    act('btnGen', function () {
+      if (isGenerating()) { stopGeneration(); return; }
+      generateTool(en);
+    });
     act('btnCopy', function () { copyResult(); });
     act('btnSave', function () { saveResultToHistory(en, null); });
     act('btnClear', function () { state.formVals[en.id] = {}; renderRight(); });
@@ -518,6 +655,25 @@
     return { system: sysBase, user: user };
   }
 
+  /**
+   * 最大输出 tokens。
+   *
+   * 【为什么要区分「深度思考」】
+   *   max_tokens 是 **思考 + 正文 的共享预算**，不是正文的单独额度。
+   *   实测（见 tools/_diag_truncation.js，打的是真实服务器）：
+   *     thinking=off, max_tokens=8192  -> finish=stop   正文 6678 字符
+   *     thinking=on,  max_tokens=8192  -> finish=length 正文 4952 字符（思考就吃掉 8491 字符）
+   *   即：开深度思考时，思维链先花掉配额，正文还没写完就被硬切断。
+   *
+   *   因此开启深度思考时必须给更大的预算。上游对 max_tokens 的接受上限实测
+   *   至少 131072（见 tools/_probe_maxtokens.js），取 32768 留足余量且不过分浪费。
+   */
+  var MAX_TOKENS_PLAIN = 8192;
+  var MAX_TOKENS_THINKING = 32768;
+  function maxTokensFor(deepThink) {
+    return deepThink ? MAX_TOKENS_THINKING : MAX_TOKENS_PLAIN;
+  }
+
   /* 请求体：与鸿蒙端一致，stream=true 走 SSE 流式（服务端逐块透传 DeepSeek 原生 delta） */
   function aiBody(system, user) {
     return {
@@ -525,7 +681,8 @@
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       stream: true,
       temperature: 0.9,
-      max_tokens: 8192,
+      // 深度思考时用更大的额度，避免思维链挤占正文导致截断
+      max_tokens: maxTokensFor(state.deepThink),
       thinking: { type: state.deepThink ? 'enabled' : 'disabled' }
     };
   }
@@ -535,9 +692,13 @@
    * resolve 为完整正文文本（含思考时仅正文）。网络/服务错误统一 reject。
    */
   function fetchAi(system, user, onThink, onDelta) {
+    // 中止控制器：让"停止"按钮能立刻掐断 SSE 读取
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    state.abortCtrl = ctrl;
     return fetch(PROXY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-proxy-token': TOKEN },
+      signal: ctrl ? ctrl.signal : undefined,
       body: JSON.stringify(aiBody(system, user))
     }).then(function (res) {
       if (!res.ok) {
@@ -555,37 +716,55 @@
           if (rc && onThink) onThink(rc);
           var text = ch.message.content;
           if (!text) throw new Error(t('web.proxyErr'));
-          return text;
+          return { text: text, finishReason: ch.finish_reason || '', reasoning: rc || '' };
         });
       }
       var reader = res.body.getReader();
       var dec = new TextDecoder('utf-8');
       var buf = '', full = '', reason = '';
+      // 记录上游结束原因：'length' 表示被 max_tokens 截断，需要提示用户
+      var finishReason = '';
+
+      /** 解析一个 SSE 数据块（抽成函数，便于结束时把残留 buf 也处理掉） */
+      function handleBlock(block) {
+        block.split('\n').forEach(function (line) {
+          if (line.indexOf('data:') !== 0) return;
+          var ev = line.slice(5).trim();
+          if (ev === '[DONE]') return;
+          var ch2;
+          try { ch2 = JSON.parse(ev); } catch (e) { return; }
+          var ch = ch2.choices && ch2.choices[0];
+          if (!ch) return;
+          // finish_reason 可能出现在最后一个 chunk（此时 delta 为空）
+          if (ch.finish_reason) finishReason = ch.finish_reason;
+          if (!ch.delta) return;
+          if (typeof ch.delta.reasoning_content === 'string' && ch.delta.reasoning_content) {
+            reason += ch.delta.reasoning_content;
+            if (onThink) onThink(reason);
+          }
+          if (typeof ch.delta.content === 'string' && ch.delta.content) {
+            full += ch.delta.content;
+            if (onDelta) onDelta(full);
+          }
+        });
+      }
+
       function pump() {
         return reader.read().then(function (r) {
-          if (r.done) return full;
+          if (r.done) {
+            // 流结束时 buf 里可能还剩最后一块（服务端未以 \n\n 结尾）
+            if (buf.trim() !== '') {
+              handleBlock(buf);
+              buf = '';
+            }
+            return { text: full, finishReason: finishReason, reasoning: reason };
+          }
           buf = buf + dec.decode(r.value, { stream: true });
           var idx;
           while ((idx = buf.indexOf('\n\n')) >= 0) {
             var block = buf.slice(0, idx);
             buf = buf.slice(idx + 2);
-            block.split('\n').forEach(function (line) {
-              if (line.indexOf('data:') !== 0) return;
-              var ev = line.slice(5).trim();
-              if (ev === '[DONE]') return;
-              var ch2;
-              try { ch2 = JSON.parse(ev); } catch (e) { return; }
-              var ch = ch2.choices && ch2.choices[0];
-              if (!ch || !ch.delta) return;
-              if (typeof ch.delta.reasoning_content === 'string' && ch.delta.reasoning_content) {
-                reason += ch.delta.reasoning_content;
-                if (onThink) onThink(reason);
-              }
-              if (typeof ch.delta.content === 'string' && ch.delta.content) {
-                full += ch.delta.content;
-                if (onDelta) onDelta(full);
-              }
-            });
+            handleBlock(block);
           }
           return pump();
         });
@@ -594,12 +773,50 @@
     });
   }
 
+  /**
+   * 生成中/空闲 两种按钮状态的切换。
+   *
+   * 需求：点击"AI 生成"后，同一个按钮变成"停止"。因此这里不再用 disabled，
+   * 而是切换文案 + 语义 class，并把点击行为交给 bindGenButton() 分派。
+   */
   function setLoading(on) {
     var b = document.getElementById('btnGen');
-    if (b) { b.disabled = on; b.textContent = on ? t('gen.loading') : t('btn.generate'); }
+    if (b) {
+      b.disabled = false;                       // 生成中必须可点，否则没法"停止"
+      b.textContent = on ? t('btn.stop') : t('btn.generate');
+      // 保留基础样式类，只切换语义类（否则会丢掉 .btn/.btn-primary 的配色）
+      b.className = on ? 'btn btn-stop' : 'btn btn-primary';
+      b.setAttribute('data-mode', on ? 'stop' : 'gen');
+    }
     var box = document.getElementById('resultBox');
     if (on && box) box.innerHTML = '<div class="spinner"></div>' + esc(t('gen.loading'));
     if (on) setEditing(false);   // 生成中禁止编辑；结束后的编辑态由 showResult 等控制
+  }
+
+  /** 当前是否有生成在进行（决定按钮点击是"开始"还是"停止"） */
+  function isGenerating() {
+    var b = document.getElementById('btnGen');
+    return !!(b && b.getAttribute('data-mode') === 'stop');
+  }
+
+  /**
+   * 停止当前生成。
+   *
+   * 三层一起停，缺一不可：
+   *   1) 中止浏览器的 SSE 读取（AbortController）—— 立刻停止上屏
+   *   2) 请求服务端取消任务 —— 让上游 DeepSeek 请求也断开，不白烧 token
+   *      （鸿蒙端同样有 GenTask.cancel()，这里与之对齐）
+   *   3) 复位界面状态，让按钮变回"AI 生成"
+   */
+  function stopGeneration() {
+    var ctrl = state.abortCtrl;
+    if (ctrl) {
+      try { ctrl.abort(); } catch (e) { /* 已结束则忽略 */ }
+    }
+    state.abortCtrl = null;
+    // 服务端取消：本机 Windows 版直连 /v1/chat/completions（非任务队列），
+    // 断开连接即等于取消，上游会随之停止。这里不发多余的请求。
+    state.stopped = true;
   }
 
   function generateTool(en) {
@@ -616,6 +833,11 @@
     var store = state.formVals[en.id];
     setLoading(true);
     var p = buildPrompt(en);
+    // 功能显示名（当前语言），通知标题/正文都基于它拼装
+    var notifyLabel = t(en.labelKey);
+    // 窗口被最小化/隐藏时，先发一条"生成中"通知（对应鸿蒙 notify.runningTitle/runningText）；
+    // 窗口可见时**不发**，避免打扰正在看界面的用户。
+    if (windowHidden()) notifyFeature(en.id, notifyLabel, 'running');
     var thinkBox = null, thinkBody = null;
     if (state.deepThink) {
       thinkBox = createThinkPanel();
@@ -629,9 +851,13 @@
         if (running) thinkBody.scrollTop = thinkBody.scrollHeight;   // 生成中保持最新行
       } : undefined),
       function (partial) { streamResult(partial); }   // 流式：正文逐块上屏
-    ).then(function (text) {
+    ).then(function (out) {
       if (thinkBox && thinkBody) collapseThinkPanel(thinkBox, thinkBody);  // 完成自动折叠
+      var text = out && typeof out === 'object' ? out.text : out;          // 兼容旧签名
+      var finish = out && typeof out === 'object' ? out.finishReason : '';
       var content = String(text || '').trim();
+      // 被 max_tokens 截断：明确提示，而不是让用户以为"生成完了但内容不全"
+      var truncated = finish === 'length';
       var json = null;
       if (en.id === 'courseware') {
         var clean = content.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
@@ -641,24 +867,54 @@
           store._json = content;
         } catch (e) {
           json = null;
+          // 截断的 JSON 一定解析失败——这时给出可操作的提示，而不是笼统的"解析失败"
+          if (truncated) truncated = true;
         }
       } else {
         content = content + '\n\n' + aiNote();
       }
       store._result = content;
+      store._truncated = truncated;
       showResult(content, en.id === 'courseware');
       if (state.autoSave && content) {
         addHistory(en, content);
       }
-      toast(t('toast.saved'));
+      if (truncated) {
+        // 截断属于"部分成功"：内容已上屏可编辑/导出，但必须让用户知道原因与对策
+        toast(t('err.truncated'));
+        showTruncateHint();
+      } else {
+        toast(t('toast.saved'));
+      }
+      // 完成通知：同一功能固定槽位，重复生成会替换旧通知而不是堆叠
+      notifyFeature(en.id, notifyLabel, 'done');
     }).catch(function (err) {
       if (thinkBox && thinkBody) collapseThinkPanel(thinkBox, thinkBody);  // 失败也收回正文
+      // 用户主动停止：保留已生成的部分内容，不当作错误
+      var aborted = (err && (err.name === 'AbortError' || state.stopped));
+      if (aborted) {
+        state.stopped = false;
+        var partial = state.lastStreamText || '';
+        if (partial.trim() !== '') {
+          store._result = partial;
+          showResult(partial, en.id === 'courseware');
+          toast(t('toast.stopped'));
+        } else {
+          showResult('', false);
+          var box2 = document.getElementById('resultBox');
+          if (box2) box2.innerHTML = '<span class="hint">' + esc(t('toast.stopped')) + '</span>';
+        }
+        return;   // 停止不是失败，不发失败通知
+      }
       showResult('', false);
       var box = document.getElementById('resultBox');
       if (box) box.innerHTML = '<span class="hint-err">' + esc(t('err.genFail') + ' ' + err.message) + '</span>';
       toast(err.message);
+      // 失败通知：同一功能同一槽位，同样不堆叠
+      notifyFeature(en.id, notifyLabel, 'fail', err && err.message ? err.message : '');
     }).then(function () {
       state.toolStates[en.id] = false;
+      state.abortCtrl = null;
       setLoading(false);
     });
   }
@@ -666,10 +922,30 @@
   /** 流式分块上屏：Markdown 实时渲染 + 自动滚到最底部 */
   function streamResult(partial) {
     var box = document.getElementById('resultBox');
+    // 记录最近一次流式正文：用户点"停止"时靠它保住已经生成的部分
+    state.lastStreamText = String(partial || '');
     if (!box) return;
     box.innerHTML = mdToHtml(partial || '');
     box.classList.remove('loading');
     scrollResultBottom(box);
+  }
+
+  /**
+   * 截断提示：附在结果框下方。
+   *
+   * 为什么要单独提示：max_tokens 截断时 finish_reason='length'，
+   * 内容看似正常但实际少了一截，用户很难自行判断。这里明确告知原因与对策。
+   */
+  function showTruncateHint() {
+    var box = document.getElementById('resultBox');
+    if (!box) return;
+    var old = document.getElementById('truncateHint');
+    if (old) old.remove();
+    var hint = document.createElement('div');
+    hint.id = 'truncateHint';
+    hint.className = 'hint-warn';
+    hint.textContent = t('err.truncatedHint');
+    if (box.parentNode) box.parentNode.insertBefore(hint, box.nextSibling);
   }
 
   /** 富文本渲染进预览框；JSON 以 <pre> 原文显示（流式完成后排版） */
@@ -1584,6 +1860,137 @@
     toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2200);
   }
 
+  /* ============================================================
+   * 消息通知（Windows / Electron 桌面端）
+   *
+   * 与鸿蒙主工程一一对应：
+   *   GenTask.ets    NOTIFY_IDS 固定 id + notifyTexts 文案拼装
+   *   NotifySlot.ets 通知渠道（本端无渠道概念，语义并入通知本体）
+   *   EntryAbility   通知权限/渠道属增强项，任何失败都静默不影响启动
+   *
+   * 桌面端实现要点：
+   *   · renderer 是沙箱页，真正的系统通知由主进程 Electron Notification
+   *     弹出，这里只负责"何时发、发什么文案"，经 preload 的 rtmNative.notify；
+   *   · 固定槽位替换由主进程完成（同一功能先 close() 旧通知再 show），
+   *     因此重复生成同一功能不会堆叠 —— 与鸿蒙固定 notifyId 行为一致；
+   *   · 窗口可见时**不**发"生成中"通知（避免打扰正在看界面的用户），
+   *     仅窗口隐藏/最小化时发，对应鸿蒙 notify.runningTitle/runningText。
+   * ============================================================ */
+  var NOTIFY_IDS = {
+    plan: 7101, courseware: 7102, quiz: 7103,
+    research: 7104, analysis: 7105, talk: 7106, report: 7107
+  };
+  var NOTIFY_ID_FALLBACK = 7199;
+  var NOTIFY_ALIASES = {
+    plan: 'plan', lesson: 'plan', lessonplan: 'plan',
+    courseware: 'courseware', ppt: 'courseware', slides: 'courseware',
+    quiz: 'quiz', exercise: 'quiz',
+    research: 'research',
+    analysis: 'analysis',
+    talk: 'talk', speech: 'talk',
+    report: 'report'
+  };
+
+  /** 取功能通知 id；未知功能（如排座位表）取兜底值 7199（等价 GenTask.notifyIdFor） */
+  function notifyIdFor(type) {
+    if (CORE && typeof CORE.notifyIdFor === 'function') return CORE.notifyIdFor(type);
+    return NOTIFY_IDS[type] !== undefined ? NOTIFY_IDS[type] : NOTIFY_ID_FALLBACK;
+  }
+  /** 把页 key / 卡片 id 归一到鸿蒙的 7 个生成功能 type 之一 */
+  function notifyTypeFor(key) {
+    if (CORE && typeof CORE.typeFor === 'function') return CORE.typeFor(key, '');
+    var k = String(key == null ? '' : key).toLowerCase().replace(/[^a-z]/g, '');
+    return NOTIFY_ALIASES[k] !== undefined ? NOTIFY_ALIASES[k] : 'other';
+  }
+
+  /** 公开区：让自动化测试可以直接校验五语言通知文案（等价 Node 侧 notify-core 用例） */
+  window.__rtmNotifyTexts = function (labelFor) {
+    var label = labelFor === undefined ? t('card.plan') : labelFor;
+    return notifyTexts(label);
+  };
+  /** 公开区：当前生效的通知核心来源（'core' | 'inline'），便于自检 */
+  window.__rtmNotifySource = function () { return CORE ? 'core' : 'inline'; };
+
+  function notifyBridge() {
+    return window.rtmNative && typeof window.rtmNative.notify === 'function'
+      ? window.rtmNative
+      : null;
+  }
+  /** 当前窗口是否对用户不可见（最小化/隐藏）——决定要不要发"生成中"通知 */
+  function windowHidden() {
+    try {
+      return document.visibilityState !== 'visible' || document.hidden === true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * 发送一条系统通知（失败一律静默，绝不打断生成流程）。
+   * @param {string} key 页 key，如 'plan'
+   * @param {string} label 当前语言显示名，如 t('card.plan') = '教案生成'
+   * @param {'done'|'fail'|'running'} kind
+   * @param {string} [detail] 附加信息（如失败原因），拼在正文末尾
+   */
+  function notifyFeature(key, label, kind, detail) {
+    var bridge = notifyBridge();
+    if (!bridge) return Promise.resolve({ ok: false, skipped: 'no-bridge' });
+    var type = notifyTypeFor(key);
+    var tx = notifyTexts(label);
+    var isFail = kind === 'fail';
+    var isRunning = kind === 'running';
+    var body = isRunning ? tx.runningText : (isFail ? tx.failBody : tx.doneBody);
+    var extra = String(detail == null ? '' : detail).trim();
+    if (extra && !isRunning) body = body + ' ' + extra;
+    var payload = {
+      kind: isRunning ? 'running' : (isFail ? 'fail' : 'done'),
+      featureKey: type,
+      featureId: notifyIdFor(type),
+      title: isRunning ? tx.runningTitle : (isFail ? tx.failTitle : tx.doneTitle),
+      body: body,
+      tag: type + ':' + (isRunning ? 'running' : (isFail ? 'fail' : 'done'))
+    };
+    return Promise.resolve()
+      .then(function () { return bridge.notify(payload); })
+      .catch(function (e) {
+        // 通知是增强项：失败仅记录，不影响生成
+        try { console.warn('[notify] 发送失败（已忽略）:', e && e.message ? e.message : e); } catch (e2) { /* ignore */ }
+        return { ok: false, error: e && e.message ? e.message : String(e) };
+      });
+  }
+
+  /** 点击系统通知 → 回到对应功能页（主进程发 rtm:focus-feature） */
+  function wireNotifyFocus() {
+    var bridge = notifyBridge();
+    if (!bridge || typeof bridge.onFocusFeature !== 'function') return;
+    bridge.onFocusFeature(function (type) {
+      var target = null;
+      for (var i = 0; i < TAB_ORDER.length && !target; i++) {
+        var list = GROUPS[TAB_ORDER[i]].entries;
+        for (var j = 0; j < list.length; j++) {
+          if (notifyTypeFor(list[j].id) === type) { target = list[j].id; break; }
+        }
+      }
+      if (target) activateFeature(target);
+    });
+  }
+  /** 切到某工具页（点击通知时复用）——未知 id 一律忽略 */
+  function activateFeature(id) {
+    if (!entryById(id)) return;
+    state.navTab = tabOf(id);
+    if (state.selId === id) { renderAll(); return; }
+    state.selId = id; save('lastTool', id);
+    renderAll();
+  }
+  /** 某工具属于哪个 Tab（'assistant' | 'family' | 'mine'） */
+  function tabOf(id) {
+    for (var i = 0; i < TAB_ORDER.length; i++) {
+      var list = GROUPS[TAB_ORDER[i]].entries;
+      for (var j = 0; j < list.length; j++) if (list[j].id === id) return TAB_ORDER[i];
+    }
+    return 'assistant';
+  }
+
   /* ---------- 渲染调度 ---------- */
   function renderAll() {
     renderLeft();
@@ -1594,6 +2001,7 @@
     applyTheme();
     renderAll();
     maybeShowDisclaimer();   // 首次启动免责声明（同意后本地记忆）
+    wireNotifyFocus();       // 点击系统通知 → 回到对应功能页（失败静默）
   }
 
   document.addEventListener('DOMContentLoaded', boot);

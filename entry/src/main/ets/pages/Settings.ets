@@ -8,6 +8,7 @@ import { I18n } from '../common/I18n';
 import { AppTheme } from '../common/AppTheme';
 import { AppFonts } from '../common/AppFonts';
 import { AppSettings } from '../common/AppSettings';
+import { NotifyDiag, NotifyDiagResult } from '../common/NotifyDiag';
 
 import { PageHeader } from '../common/components/PageHeader';
 
@@ -25,6 +26,15 @@ export struct SettingsContent {
   @StorageLink('fontScale') fontScale: number = 1.0;
   /** 字号档位选中下标（0..3，对应 AppSettings.FONT_PRESETS） */
   @State selFontIdx: number = 1;
+
+  // ---- 通知自检（排查收不到通知用）----
+  @State diagEnabled: string = '';
+  @State diagSound: string = '';
+  @State diagVibration: string = '';
+  @State diagBanner: string = '';
+  @State diagLock: string = '';
+  @State diagSlots: string = '';
+  @State diagAdvice: string = '';
 
 
   private t(key: string): string {
@@ -406,6 +416,58 @@ export struct SettingsContent {
               .fontColor(this.col('text'))
               .lineHeight(22)
               .width('100%')
+          }
+          .width('100%')
+          .padding(16)
+          .backgroundColor(this.col('card'))
+          .borderRadius(14)
+          .alignItems(HorizontalAlign.Start)
+
+          // 通知自检（排查"收不到通知/不弹横幅"用；真机上可直接看到系统侧真实状态）
+          Column({ space: 8 }) {
+            Row() {
+              Text('通知自检')
+                .fontFamily(AppFonts.family())
+                .fontSize(13)
+                .fontColor(this.col('sub'))
+                .layoutWeight(1)
+              Button('检查')
+                .fontSize(13)
+                .height(30)
+                .backgroundColor('#4A90D9')
+                .onClick(() => {
+                  NotifyDiag.run().then((r: NotifyDiagResult) => {
+                    this.diagEnabled = r.enabled;
+                    this.diagSound = r.sound;
+                    this.diagVibration = r.vibration;
+                    this.diagBanner = r.banner;
+                    this.diagLock = r.lockScreen;
+                    this.diagSlots = r.slots;
+                    this.diagAdvice = r.advice;
+                  }).catch((e: Error) => {
+                    this.diagAdvice = '自检异常: ' + e.message;
+                  });
+                })
+            }
+            .width('100%')
+
+            if (this.diagAdvice !== '') {
+              Text('总开关: ' + this.diagEnabled)
+                .fontFamily(AppFonts.family()).fontSize(13).fontColor(this.col('text')).width('100%')
+              Text('横幅: ' + this.diagBanner + '    响铃: ' + this.diagSound)
+                .fontFamily(AppFonts.family()).fontSize(13).fontColor(this.col('text')).width('100%')
+              Text('振动: ' + this.diagVibration + '    锁屏: ' + this.diagLock)
+                .fontFamily(AppFonts.family()).fontSize(13).fontColor(this.col('text')).width('100%')
+              Text('渠道: ' + this.diagSlots)
+                .fontFamily(AppFonts.family()).fontSize(12).fontColor(this.col('hint')).width('100%')
+              Text(this.diagAdvice)
+                .fontFamily(AppFonts.family()).fontSize(13).fontColor('#D9534F')
+                .lineHeight(20).width('100%')
+            } else {
+              Text('点「检查」读取系统侧通知开关与横幅状态，用于排查收不到通知的问题。')
+                .fontFamily(AppFonts.family()).fontSize(12).fontColor(this.col('hint'))
+                .lineHeight(19).width('100%')
+            }
           }
           .width('100%')
           .padding(16)

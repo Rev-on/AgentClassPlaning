@@ -361,6 +361,12 @@ struct Splash {
     return I18n.t('splash.l2');
   }
 
+  /** 启动屏底部说明文案（跟随语言切换重算） */
+  private ipv6Text(): string {
+    void this.appLang;
+    return I18n.t('splash.ipv6');
+  }
+
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
       // 文字与图案占位层：整体上移编排；文字在图案成形后淡入
@@ -416,7 +422,13 @@ struct Splash {
           .fontFamily(AppFonts.family())
           .fontSize(11)
           .fontColor(this.col('faint'))
-          .padding({ bottom: 26 })
+        // 底部说明：服务端已启用 IPv6 双栈监听（HOST=::），客户端可经 IPv6 接入。
+        // 放在版本号**下面**，字号与版本号一致、颜色取 faint，保持整块低调不抢主体。
+        Text(this.ipv6Text())
+          .fontFamily(AppFonts.family())
+          .fontSize(11)
+          .fontColor(this.col('faint'))
+          .padding({ top: 6, bottom: 26 })
       }
       .width('100%')
       .height('100%')

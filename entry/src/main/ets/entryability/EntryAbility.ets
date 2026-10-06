@@ -9,6 +9,7 @@ import { AppSettings } from '../common/AppSettings';
 import { AppTheme } from '../common/AppTheme';
 import { ContinuationService } from '../common/ContinuationService';
 import { PushToken } from '../common/PushToken';
+import { NotifySlot } from '../common/NotifySlot';
 
 const DOMAIN = 0x0000;
 
@@ -112,15 +113,25 @@ export default class EntryAbility extends UIAbility {
    *   · 未授权时 requestEnableNotification 拉起系统授权弹窗（只会弹一次，
    *     用户拒绝后系统不再重复弹，需引导去设置页手动开启）；
    *   · 全程失败静默，不影响应用启动。
+   *
+   * 与通知渠道的关系（重要）：
+   *   渠道（NotifySlot）必须在**权限就绪之后**创建。若在权限未开时调 addSlot，
+   *   会失败并返回 1600004，导致渠道缺失 —— 即使后续用户手动开了通知，
+   *   也会因为"没有高位渠道"而不响铃、无横幅。
+   *   因此这里在授权的每个分支（已开启 / 刚授权成功）都补一次 ensure。
    */
   private requestNotifyPermission(ctx: common.UIAbilityContext): void {
     notificationManager.isNotificationEnabled().then((enabled: boolean) => {
       hilog.info(DOMAIN, 'testTag', '通知权限当前状态: %{public}s', enabled ? '已开启' : '未开启');
       if (enabled) {
+        // 权限已就绪：可安全注册渠道
+        NotifySlot.ensure(ctx);
         return;
       }
       notificationManager.requestEnableNotification(ctx).then(() => {
         hilog.info(DOMAIN, 'testTag', '通知权限申请成功');
+        // 刚拿到授权：此刻注册渠道才会成功
+        NotifySlot.ensure(ctx);
       }).catch((err: BusinessError) => {
         // 1600004 = 用户已拒绝过，系统不再弹窗；需引导用户到设置里手动开启
         hilog.warn(DOMAIN, 'testTag', '通知权限申请失败 code=%{public}d %{public}s',
@@ -135,6 +146,10 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
+    // 补偿注册通知渠道：用户可能在系统设置里**后来才**打开通知总开关，
+    // 此时启动期的注册已因 1600004 失败过；用 ensureRetryable 在此补上
+    // （内部失败会复位标记，保证下次进入前台仍会重试）。
+    NotifySlot.ensureRetryable(this.context);
   }
 
   onBackground(): void {

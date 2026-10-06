@@ -293,6 +293,8 @@ export class I18n {
     ['talk.t3', '激励引导'],
     ['splash.l1', '教学如此简单，'],
     ['splash.l2', '可惜你才知道'],
+    // 启动屏底部说明：服务端已启用 IPv6 双栈监听（HOST=::），客户端可走 IPv6 接入
+    ['splash.ipv6', 'Agent备课已支持IPv6网络'],
     ['seats.importRoster', '导入班级名单'],
     ['seats.saveRoster', '保存到班级名单'],
     ['seats.pickClass', '导入班级'],
@@ -375,6 +377,14 @@ export class I18n {
     ['err.pptxJson', '课件大纲 JSON 为空或格式不正确，无法导出 PPTX'],
     ['err.pptxTpl', 'PPTX 模板缺少必要部件：'],
     ['err.canceled', '任务已取消'],
+    // ---- 生成完成系统通知（7 大 AI 生成功能，由客户端本地化后经服务端 Push Kit 下发） ----
+    // 标题固定；正文 = 前缀 + 功能名 + 后缀（I18n.t 不支持占位符，故拆成三段拼接）
+    ['notify.done.title', '生成完成'],
+    ['notify.done.body.a', '「'],
+    ['notify.done.body.b', '」已生成完成，点击查看'],
+    ['notify.fail.title', '生成失败'],
+    ['notify.fail.body.a', '「'],
+    ['notify.fail.body.b', '」生成失败，点击重试'],
     ['err.rateLimit', '请求过于频繁，请稍后再试'],
     ['err.taskMissing', '任务不存在或已过期'],
     ['err.serverBusy', '服务异常，请稍后再试'],
@@ -678,6 +688,8 @@ export class I18n {
     ['splash.l1', 'Teaching, this simple.'],
 
     ['splash.l2', "if only you'd known sooner."],
+    // Splash footer: server now listens dual-stack (HOST=::), so clients may connect over IPv6
+    ['splash.ipv6', 'Agent Lesson Prep now supports IPv6'],
     ['seats.importRoster', 'Import Class Roster'],
     ['seats.saveRoster', 'Save to Class Roster'],
     ['seats.pickClass', 'Import class'],
@@ -760,6 +772,13 @@ export class I18n {
     ['err.pptxJson', 'The outline JSON is empty or invalid, so it cannot be exported to PPTX'],
     ['err.pptxTpl', 'The PPTX template is missing a required part: '],
     ['err.canceled', 'Task cancelled'],
+    // ---- Generation-complete system notifications (7 AI features; localized on client) ----
+    ['notify.done.title', 'Generation complete'],
+    ['notify.done.body.a', '"'],
+    ['notify.done.body.b', '" is ready. Tap to view.'],
+    ['notify.fail.title', 'Generation failed'],
+    ['notify.fail.body.a', '"'],
+    ['notify.fail.body.b', '" failed to generate. Tap to retry.'],
     ['err.rateLimit', 'Too many requests. Please try again later'],
     ['err.taskMissing', 'Task not found or expired'],
     ['err.serverBusy', 'Service error. Please try again later'],

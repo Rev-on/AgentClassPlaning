@@ -12,6 +12,7 @@
  *   GET  /api/task/:id         查询任务状态与结果
  *   GET  /api/tasks?deviceId=  按设备列出最近任务
  *   POST /api/push/register    上报设备 Push Token
+ *   POST /api/data/delete      删除本设备在服务端保存的全部数据（任务 + 设备注册记录）
  *   POST /api/push/receipt     接收华为 Push Kit 消息回执（华为服务器回调）
  *   GET  /api/push/receipt/stats 回执统计（调试用，需代理令牌）
  *
@@ -31,8 +32,70 @@ const rag = require('./rag');
 /** 消息推送总开关：客户端已取消通知/推送功能，默认关闭；如需重新启用设环境变量 PUSH_ENABLED=1 */
 const PUSH_ENABLED = process.env.PUSH_ENABLED === '1';
 
+/**
+ * 向某设备的**全部有效 token** 推送完成通知，并清理失效 token。
+ *
+ * 为什么不是只推最新一条：
+ *   同一用户可能因重装/换机在服务端留下多条 token 记录；只推最新一条时，
+ *   若那条恰好失效，整条通知就丢失了（而且日志里仍是"已受理"，很难发现）。
+ *   改为广播后，只要有一条 token 有效，通知就能送达。
+ *
+ * 失效清理：
+ *   华为对无效 token 返回 code=80300007 并在 msg 里给出 illegalTokens；
+ *   据此把对应记录删掉，避免每次任务完成都重复无效推送。
+ *
+ * @param {string} deviceId 设备标识
+ * @param {{notifyId:number,title:string,body:string,data:object}} msg 通知内容
+ */
+async function pushToDevice(deviceId, msg) {
+  const all = tasks.listDevices();
+  const tid = String(deviceId || '');
+  // 优先推该设备自己的 token；若查不到（如记录被清理）则回退到全部有效 token
+  const mine = all.filter((d) => d.id === tid);
+  const targets = mine.length > 0 ? mine : all;
+  if (targets.length === 0) {
+    console.warn('[push] 无有效设备 token，跳过通知 deviceId=' + tid);
+    return;
+  }
+  const dead = [];
+  for (const d of targets) {
+    try {
+      const r = await push.sendAlert({
+        token: d.token,
+        notifyId: msg.notifyId,
+        title: msg.title,
+        body: msg.body,
+        data: msg.data
+      });
+      if (r && r.ok) {
+        // 华为受理即认为该 token 可用，无需继续试其它 token
+        if (dead.length > 0) {
+          tasks.forgetInvalidTokens(dead);
+        }
+        return;
+      }
+      if (r && r.illegalTokens && r.illegalTokens.length > 0) {
+        for (const t of r.illegalTokens) {
+          dead.push(t);
+        }
+      }
+    } catch (e) {
+      console.error('[push] 发送异常 deviceId=' + d.id + ' err='
+        + String(e && e.message || e));
+    }
+  }
+  if (dead.length > 0) {
+    tasks.forgetInvalidTokens(dead);
+  }
+  console.error('[push] 全部 token 推送失败 deviceId=' + tid + ' 尝试数=' + targets.length);
+}
+
 const PORT = Number(process.env.PORT || 3000);
-const HOST = process.env.HOST || '0.0.0.0';
+// 监听地址。默认 '::' = IPv6 双栈：
+//   Linux 默认 net.ipv6.bindv6only=0，绑定 :: 时同一 socket 也接受 IPv4
+//   （对端显示为 ::ffff:x.x.x.x），因此一份配置即可同时服务 IPv4/IPv6 客户端。
+//   若显式设为 0.0.0.0 则只监听 IPv4，纯 IPv6 客户端将无法连接。
+const HOST = process.env.HOST || '::';
 // TLS 配置：证书文件存在（或用 SSL_CERT/SSL_KEY 覆盖路径）即自动启用 HTTPS 监听 PORT
 const SSL_CERT = process.env.SSL_CERT || '/etc/ssl/rev-on.site/server.pem';
 const SSL_KEY = process.env.SSL_KEY || '/etc/ssl/rev-on.site/private_key.pem';
@@ -390,6 +453,22 @@ const feedSubs = new Map();
 /** taskId -> 运行中已累积的思考文本（深度思考；供 feed 重连时补齐） */
 const taskReasoning = new Map();
 
+/**
+ * 任务被过期清理时，同步释放以 taskId 为键的旁挂内存 Map。
+ *
+ * 为什么需要：tasks.js 只知道自己那张 tasks 表；server.js 里还旁挂了
+ * taskAttachments（附件 base64，体积最大）、taskReasoning（思维链）、
+ * taskAborters、feedSubs。任务从 tasks 表删掉后如果不同步删这些键，
+ * 它们会永久残留 —— 尤其是从未被消费的附件（任务在 pending 中进程重启等），
+ * 属于实打实的内存泄漏。同时把仍未结束的 feed 连接结束掉，避免客户端挂死等待。
+ */
+tasks.setTaskPurgeHook((taskId) => {
+  taskAttachments.delete(taskId);
+  taskReasoning.delete(taskId);
+  taskAborters.delete(taskId);
+  feedClose(taskId); // 内部会 res.end() 所有订阅连接并删除 feedSubs 中的键
+});
+
 function feedSend(taskId, event, obj) {
   const subs = feedSubs.get(taskId);
   if (!subs) {
@@ -617,13 +696,12 @@ function runTask(taskId) {
             event: task.liveView.event || 'PROGRESS'
           }).catch((e) => console.error('[tasks] liveview end 失败: ' + String(e && e.message || e)));
         }
-        await push.sendAlert({
-          token: tasks.tokenOf(task.deviceId),
+        await pushToDevice(task.deviceId, {
           notifyId: task.notifySeed,
           title: task.notifyTitle,
           body: task.notifyBody,
           data: { taskId: taskId, type: task.type, status: 'done' }
-        }).catch((e) => console.error('[tasks] push done 失败: ' + String(e && e.message || e)));
+        });
       }
     } catch (e) {
       const msg = e && e.message ? String(e.message) : '生成失败';
@@ -640,13 +718,12 @@ function runTask(taskId) {
       feedClose(taskId);
       taskReasoning.delete(taskId);
       if (PUSH_ENABLED) {
-        await push.sendAlert({
-          token: tasks.tokenOf(task.deviceId),
+        await pushToDevice(task.deviceId, {
           notifyId: task.notifySeed,
           title: task.notifyFailTitle,
           body: task.notifyFailBody,
           data: { taskId: taskId, type: task.type, status: 'failed' }
-        }).catch((e) => console.error('[tasks] push fail 失败: ' + String(e && e.message || e)));
+        });
       }
     }
   }).catch((e) => console.error('[tasks] task error: ' + (e && e.message ? e.message : String(e))));
@@ -809,6 +886,13 @@ app.get('/api/tasks', checkToken, (req, res) => {
     res.status(400).json({ error: { message: 'deviceId 不能为空' } });
     return;
   }
+  // 列表接口顺带做一次过期清理：磁盘留存期与"对客户端可见"的窗口保持一致，
+  // 不必等到下一个 10 分钟周期。purgeExpired 幂等且无删除时不做任何落盘，开销可忽略。
+  try {
+    tasks.purgeExpired();
+  } catch (e) {
+    console.error('[rev-ai-proxy] 列表前清理异常: ' + (e && e.message ? e.message : String(e)));
+  }
   res.json({ ok: true, tasks: tasks.listByDevice(deviceId, Number(req.query.limit) || 20) });
 });
 
@@ -823,6 +907,51 @@ app.post('/api/push/register', checkToken, (req, res) => {
   }
   tasks.registerDevice(deviceId, token);
   res.json({ ok: true });
+});
+
+/**
+ * 删除本设备在服务端保存的全部数据（用户主动行使删除权）。
+ *
+ * 为什么需要：仅有周期性过期清理时，用户无法**主动要求**删除自己的服务器数据，
+ * 隐私协议也就无法承诺"可随时删除"。本接口补齐该能力。
+ *
+ * 删除范围：该 deviceId 名下的**全部任务记录**（含 user/system 提示词、content 生成结果、
+ * reasoning 思维链，不论 pending/running/done/failed）与 devices.json 中的设备注册记录。
+ * **只删该 deviceId 的数据，其他人的数据不受影响**（见 tasks.deleteByDevice 的相等匹配与空值保护）。
+ *
+ * 鉴权：与其它受保护路由一致走 checkToken（配置了 PROXY_TOKEN 时需带 x-proxy-token），
+ * 避免任意人凭一个 deviceId 就删掉他人数据。
+ *
+ * 用法：POST /api/data/delete  body: {"deviceId":"..."}
+ *      返回：{ok:true, tasks:n, devices:m}
+ */
+app.post('/api/data/delete', checkToken, (req, res) => {
+  const body = req.body || {};
+  const deviceId = typeof body.deviceId === 'string' ? body.deviceId : '';
+  if (deviceId === '') {
+    res.status(400).json({ error: { message: 'deviceId 不能为空' } });
+    return;
+  }
+  // 先把该设备正在生成的任务中断掉：删除后任务已不存在，继续跑只会浪费上游额度，
+  // 且其回调会往已删除的 taskId 上写状态。
+  const running = tasks.listByDevice(deviceId, Number.MAX_SAFE_INTEGER)
+    .filter((t) => t.status === tasks.STATUS.RUNNING || t.status === tasks.STATUS.PENDING);
+  for (const t of running) {
+    const ab = taskAborters.get(t.id);
+    if (ab) {
+      ab.manual = true;
+      try {
+        ab.ctrl.abort();
+      } catch (e) {
+        // 已结束的任务 abort 无副作用，忽略
+      }
+    }
+  }
+  if (running.length > 0) {
+    console.log('[rev-ai-proxy] 主动删除前中断任务 ' + running.length + ' 个 deviceId=' + deviceId);
+  }
+  const r = tasks.deleteByDevice(deviceId);
+  res.json({ ok: true, tasks: r.tasks, devices: r.devices });
 });
 
 /* ===================== 华为 Push Kit 消息回执 ===================== */
@@ -844,7 +973,19 @@ app.post('/api/push/register', checkToken, (req, res) => {
 app.post('/api/push/receipt', (req, res) => {
   const v = pushReceipt.verify(req);
   if (!v.ok) {
-    console.warn('[push-receipt] 鉴权失败: ' + v.reason);
+    // 诊断增强：鉴权失败时把**原始头**与本地时钟一并打出。
+    // 为什么需要：`timestamp expired` 有多种成因（时钟偏差、上游代理改写头、
+    // 回调密钥不一致导致 value 被误判），只看 reason 无法区分，导致反复盲猜。
+    // 打印原始 timestamp 与本地时间可直接判定是不是时钟问题。
+    const raw = req.get('X-HUAWEI-CALLBACK-ID') || '';
+    const m = /timestamp=(\d+)/.exec(raw);
+    const huaweiTs = m ? Number(m[1]) : 0;
+    const nowSec = Math.floor(Date.now() / 1000);
+    console.warn('[push-receipt] 鉴权失败: ' + v.reason
+      + ' | 华为timestamp=' + (huaweiTs || '(未解析到)')
+      + ' 本地=' + nowSec
+      + ' 差值=' + (huaweiTs ? (nowSec - huaweiTs) : '?') + '秒'
+      + ' | 原始头长度=' + raw.length);
     // 华为要求返回 200 + code；鉴权失败时用非 0 code 明确拒绝
     res.status(200).json({ code: '1', message: 'auth failed: ' + v.reason });
     return;
@@ -930,8 +1071,47 @@ app.use((err, req, res, next) => {
 // 先载入新课标 RAG 索引（学科索引 + 内容索引），失败不影响主服务启动
 rag.load();
 
+/**
+ * 绑定监听地址，并在**双栈不可用**时自动回退 IPv4。
+ *
+ * 为什么需要回退：
+ *   默认 HOST='::'（双栈）。但若内核缺少 IPv6 支持或已 `sysctl
+ *   net.ipv6.conf.all.disable_ipv6=1`，绑定 '::' 会抛 EAFNOSUPPORT，
+ *   Node 的 listen 错误是**异步**的（'error' 事件），若不处理会直接让进程退出。
+ *   为免"改个监听地址把服务弄挂"，失败时打印告警并回退到 0.0.0.0。
+ *
+ * @param {http.Server|https.Server} server 已创建但未监听的 server
+ * @param {number} port 端口
+ * @param {string} label 日志前缀（区分主端口/兼容端口）
+ * @param {() => void} onOk 绑定成功回调
+ */
+function listenWithFallback(server, port, label, onOk) {
+  const bind = (host, isFallback) => {
+    server.listen(port, host, () => {
+      if (isFallback) {
+        console.warn('[rev-ai-proxy] 注意：IPv6 不可用，已回退为仅监听 IPv4（'
+          + host + ':' + port + '）');
+      }
+      onOk();
+    });
+  };
+  server.once('error', (e) => {
+    if (e && e.code === 'EAFNOSUPPORT' && HOST === '::') {
+      console.error('[rev-ai-proxy] 绑定 :: 失败（本机未启用 IPv6）：'
+        + (e.message || String(e)) + '，回退 0.0.0.0');
+      bind('0.0.0.0', true);
+      return;
+    }
+    console.error('[rev-ai-proxy] 监听失败 ' + label + ' port=' + port
+      + ' host=' + HOST + ' err=' + (e && e.message ? e.message : String(e)));
+  });
+  bind(HOST, false);
+}
+
 function onListen(scheme) {
-  console.log('[rev-ai-proxy] listening on ' + scheme + '://' + HOST + ':' + PORT);
+  // HOST='::' 时打印成可读形式：实际同时接受 IPv4 与 IPv6
+  const shown = HOST === '::' ? '[::] (IPv6+IPv4 双栈)' : HOST;
+  console.log('[rev-ai-proxy] listening on ' + scheme + '://' + shown + ':' + PORT);
   if (!API_KEY) {
     console.warn('[rev-ai-proxy] 警告：尚未配置 DEEPSEEK_API_KEY（请检查 .env）');
   }
@@ -949,16 +1129,16 @@ if (TLS_ENABLED) {
     console.error('[rev-ai-proxy] 已回退明文 HTTP，请检查证书路径：' + SSL_CERT + ' / ' + SSL_KEY);
   }
   if (tlsOpts) {
-    https.createServer(tlsOpts, app).listen(PORT, HOST, () => onListen('https'));
+    listenWithFallback(https.createServer(tlsOpts, app), PORT, 'https', () => onListen('https'));
     // 平滑迁移：TLS 生效期间仍可设置 HTTP_PORT 保留明文入口（如旧版 App 未升级前）
     if (HTTP_PORT > 0) {
-      http.createServer(app).listen(HTTP_PORT, HOST, () => {
+      listenWithFallback(http.createServer(app), HTTP_PORT, 'http-compat', () => {
         console.log('[rev-ai-proxy] (兼容) 明文 HTTP 监听 http://' + HOST + ':' + HTTP_PORT);
       });
     }
   } else {
-    http.createServer(app).listen(PORT, HOST, () => onListen('http'));
+    listenWithFallback(http.createServer(app), PORT, 'http', () => onListen('http'));
   }
 } else {
-  http.createServer(app).listen(PORT, HOST, () => onListen('http'));
+  listenWithFallback(http.createServer(app), PORT, 'http', () => onListen('http'));
 }

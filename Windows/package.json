@@ -1,13 +1,18 @@
 {
   "name": "rev-techingmaster-windows",
   "version": "1.0.0",
-  "description": "Rev TechingMaster 电脑版（Electron）：初中教学备课智能助手",
+  "description": "Agent备课 电脑版（Electron）：初中教学备课智能助手",
   "main": "main.js",
-  "author": "Rev TechingMaster",
+  "author": "Agent备课",
   "license": "AGPL-3.0",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "portable": "electron-builder --win portable",
+    "build:icon": "node build-icon.js --master build/icon-master-600.png",
+    "sign": "node sign.js",
+    "sign:trust": "node sign.js --trust",
+    "sign:verify": "node sign.js --verify"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -16,7 +21,7 @@
   },
   "build": {
     "appId": "com.rev.techingmaster",
-    "productName": "Rev TechingMaster",
+    "productName": "Agent备课",
     "directories": {
       "output": "dist"
     },
@@ -42,8 +47,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Rev TechingMaster",
-      "artifactName": "RevTechingMaster-Setup-${version}.${ext}"
+      "shortcutName": "Agent备课",
+      "artifactName": "AgentBeike-Setup-${version}.${ext}"
     }
   }
 }

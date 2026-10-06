@@ -4,11 +4,12 @@
 
 ## 核心功能
 
-- **智能备课**：AI 生成教案、逐页课件大纲（结构化 JSON，可导出 PPT）、分层练习、教研文章。
+- **智能备课**：AI 逐页生成整份 HTML 课件（统一 CSS 样式，16:9 预览不溢出，可导出 PPTX）、教案、分层练习、教研文章。
 - **学情与班级**：Excel 导入成绩做学情分析并生成 Word 报告；班级名单管理；身高蛇形算法智能排座，支持点击互换。
 - **家校沟通**：AI 生成家长沟通话术。
+- **新课标 RAG**：14 份《义务教育课程方案和课程标准（2022 年版）》原文、1428 个条目块，纯内存 BM25 注入；未收录学科不拿其它学科顶替。
 - **责任机制**：所有 AI 内容统一标注“（AI生成，仅供参考）”，首次启动 5 秒倒计时免责声明。
-- **多语言**：中、英、维吾尔、藏、蒙古五语言界面（各 360 条键，无缺项），内置对应少数民族字体，数据本地优先、不上云。
+- **多语言**：中、英、维吾尔、藏、蒙古五语言界面（中英各 378 条键，维/藏/蒙各 372 条，少数缺项自动回退中文），内置藏文乌金体与维吾尔 UKIJMejT 字体（蒙古语为西里尔文，用系统字体），数据本地优先、不上云。
 
 ## 技术架构
 
@@ -74,7 +75,28 @@ npm run dist        # electron-builder 产出 NSIS 安装包
 # 或 npm start 直接调试
 ```
 
-图标需 `Windows/build/icon.ico`（`package.json` 的 `build.win.icon` 指向它）；带图标打包用 `build-with-icon.ps1`。
+应用名与图标从鸿蒙主工程同步：名称 `Agent备课`（对齐 `AppScope` 的 `app_name`），
+图标由 `node build-icon.js` 从鸿蒙 1024×1024 主图 `AppScope/resources/base/media/icon.png`
+重新生成 `build/icon.ico`（7 档尺寸 16–256）与 `renderer/icon.png`，脚本零依赖、可重复执行。
+多语言词典由 `node tools/gen_i18n_windows.js` 从鸿蒙 `I18n.ets` 与三份少数民族语言词典生成，
+用 `node tools/verify_i18n_windows.js` 校验一致性（zh/en 各 378 键，ug/bo/mn 各 372 键）。
+
+**消息通知**：生成完成/失败时弹 Windows 系统通知，语义对齐鸿蒙 `NotifySlot.ets` + `GenTask.ets`
+（逐功能固定通知 ID 7101–7107，兜底 7199，重复生成覆盖不堆叠）；点击通知会在窗口恢复并跳到对应功能页。
+实现见 `renderer/js/notify-core.js`、`main.js`、`renderer/preload.js`，说明见 `Windows/通知功能说明.md`。
+回归测试：`node server/tools/test_windows_notify_e2e.js`（在真实 renderer 文件上做端到端断言）。
+
+**构建产物**（已在 `Windows/dist/` 生成）：
+
+| 产物 | 说明 |
+| --- | --- |
+| `Windows/dist/AgentBeike-Setup-1.0.0.exe` | NSIS 安装包（约 75 MB），快捷方式名 `Agent备课` |
+| `Windows/dist/Agent备课 1.0.0.exe` | 免安装单文件绿色版（约 68 MB） |
+
+> 无交互式桌面会话的环境（连 `notepad` 都立即退出）下，electron-builder 的 NSIS
+> 两遍构建会在"运行安装程序以提取卸载器"这步挂起，产出仅 0.22 MB 的残缺包。
+> 这是环境限制而非工程缺陷；详见 `Windows/通知功能说明.md` 第 9.3 节。
+
 
 ### 服务端
 
