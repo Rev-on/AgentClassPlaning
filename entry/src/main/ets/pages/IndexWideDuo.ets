@@ -251,9 +251,12 @@ export struct IndexWideDuo {
   @State paneIn: boolean = true;
   /** 左栏卡片网格过渡（切换页签时淡入 + 左移） */
   @State gridIn: boolean = true;
-  /** 底部页签高亮选择块：单格宽度与当前偏移（vp，onAreaChange 测量后生效） */
-  @State tabSlot: number = 0;
-  @State tabOff: number = 0;
+  /**
+   * 左栏导航当前索引（0=备课助手 1=家校沟通 2=我的），与 navTab 一一对应。
+   * 由 Tabs **构造参数** `index:` 消费（TabsAttribute 上没有 `.index()` 修饰器），
+   * 并在 `.onChange()` 里回写，保持"外部改 navTab → Tabs 跟随"的单向同步。
+   */
+  @State tabsIndex: number = 0;
   /** 左栏（手机式面板）宽度：由 LayoutPolicy 按设备形态给出（三折叠/阔折叠更宽），缺省 400 */
   @StorageProp('appSidebarVp') sidebarVp: number = 400;
 
@@ -372,22 +375,44 @@ export struct IndexWideDuo {
     return 0;
   }
 
-  /** 测量底部页签容器宽度：计算选择块单格宽度并定位当前偏移 */
-  private measureTabs(width: number): void {
-    if (width <= 0) {
-      return;
+  /** 页签索引反查（0/1/2 → assistant/family/mine），与 tabIndexOf 互为逆运算 */
+  private tabKeyOf(index: number): string {
+    if (index === 1) {
+      return 'family';
     }
-    const slot: number = width / 3;
-    this.tabSlot = slot;
-    this.tabOff = this.tabIndexOf(this.navTab) * slot;
+    if (index === 2) {
+      return 'mine';
+    }
+    return 'assistant';
   }
 
-  /** 切换页签：左栏网格与右栏内容带过渡，右栏切到该页签首个工具 */
+  /**
+   * 系统默认底部导航项：BottomTabBarStyle(icon, text)，与手机主页面 / 平板页面同款。
+   *
+   * 原实现是手写的 Stack + Row：一个靠 `measureTabs()` 测宽、再按 tabOff 平移的
+   * `#E8F1FB` 高亮块 + 一排纯文字（没有图标、没有系统选中态与点击动效）。
+   * 换成系统默认样式后，图标在上、文字在下，选中态/着色/动效/深浅色适配全部由
+   * 系统接管；当前页由 Tabs 构造参数 `index: this.tabsIndex` 指定。
+   *
+   * 图标用系统内置符号资源 `$r('sys.symbol.*')`，不新增图片文件；符号名取自 SDK
+   * 资源索引 toolchains/id_defined.json（type=='symbol'），均已确认存在：
+   *   house · message · person
+   */
+  private bottomStyle(icon: string, textKey: string): BottomTabBarStyle {
+    return BottomTabBarStyle.of($r('sys.symbol.' + icon), this.t(textKey));
+  }
+
+  /**
+   * 切换页签：左栏网格与右栏内容带过渡，右栏切到该页签首个工具。
+   *
+   * 同时把 tabsIndex 对齐到目标页签 —— 放在**早退之前**，与 IndexWide 保持一致，
+   * 这样无论从哪条路径调用本方法，底部系统页签的选中态都不会与 navTab 脱节。
+   */
   private switchTab(tab: string): void {
+    this.tabsIndex = this.tabIndexOf(tab);
     if (this.navTab === tab) {
       return;
     }
-    const idx: number = this.tabIndexOf(tab);
     this.paneIn = false;
     this.gridIn = false;
     this.navTab = tab;
@@ -399,12 +424,54 @@ export struct IndexWideDuo {
       animateTo({ duration: 260, curve: Curve.EaseOut }, () => {
         this.paneIn = true;
         this.gridIn = true;
-        if (this.tabSlot > 0) {
-          // 底部高亮选择块平滑滑到新页签
-          this.tabOff = idx * this.tabSlot;
-        }
       });
     }, 40);
+  }
+
+  /**
+   * 左栏底部导航（系统默认 BottomTabBarStyle）。
+   *
+   * 为什么这里自己套了一层 Tabs：
+   *   左栏本身是 split-screen 分栏里的一列（上面是标题 + 可滚动的卡片 Grid），
+   *   系统默认底栏必须挂在 Tabs 组件上，所以这里用一个"**只有页签栏可见**"的 Tabs
+   *   来承载它：内容区高度为 0（TabContent 逐项 .height(0)），Tabs 总高 56，
+   *   页签栏靠 `barPosition: End` 正好落在这 56vp 里。
+   *   这样 Tabs 既不会吃掉分栏高度，也不会在左栏里再造一套滚动内容，
+   *   原来的三处内容（标题 / 卡片网格 / 右栏工具区）与分屏逻辑一行未动。
+   */
+  @Builder
+  navTabs() {
+    Tabs({ barPosition: BarPosition.End, index: this.tabsIndex }) {
+      // 仅提供页签项；内容区高度为 0，真正的界面仍由 navTab 驱动的既有 Grid/右栏渲染
+      TabContent() {
+      }
+      .height(0)
+      .tabBar(this.bottomStyle('house', 'tab.assistant'))
+
+      TabContent() {
+      }
+      .height(0)
+      .tabBar(this.bottomStyle('message', 'tab.family'))
+
+      TabContent() {
+      }
+      .height(0)
+      .tabBar(this.bottomStyle('person', 'tab.mine'))
+    }
+    .width('100%')
+    // 固定 56vp：系统默认底栏高度，显式约束避免在分屏列里被拉高或撑开
+    .height(56)
+    .barHeight(56)
+    .barMode(BarMode.Fixed)
+    .scrollable(false)
+    // 与手机/平板页一致：背景交给主题色同步，高度/分割线由系统底栏样式决定
+    .barBackgroundColor(this.col('barBg'))
+    .onChange((index: number) => {
+      // Tabs 索引 → 既有 tabKey，复用 switchTab 的全部既有行为
+      // （设置 navTab、把 selId 重置为该分组首项、保留 paneIn/gridIn 过渡动画）
+      // tabsIndex 由 switchTab 内部统一对齐，这里不重复赋值，避免两处状态源。
+      this.switchTab(this.tabKeyOf(index));
+    })
   }
 
   /** 选择工具：右栏内容过渡切换 */
@@ -534,40 +601,8 @@ export struct IndexWideDuo {
         .opacity(this.gridIn ? 1 : 0)
         .translate({ x: this.gridIn ? 0 : -18 })
 
-        // 底部三 Tab：选中高亮块在页签间平滑滑动
-        Stack({ alignContent: Alignment.Start }) {
-          Column()
-            .width(this.tabSlot)
-            .height(40)
-            .borderRadius(10)
-            .backgroundColor('#E8F1FB')
-            .offset({ x: this.tabOff })
-          Row() {
-            ForEach(['assistant', 'family', 'mine'], (tab: string) => {
-              Text(this.t(this.groupOf(tab).tabKey))
-                .fontFamily(AppFonts.family())
-                .fontSize(13)
-                .fontColor(this.navTab === tab ? '#4A90D9' : this.col('hint'))
-                .fontWeight(this.navTab === tab ? FontWeight.Bold : FontWeight.Normal)
-                .textAlign(TextAlign.Center)
-                .layoutWeight(1)
-                .height(40)
-                .onClick(() => this.switchTab(tab))
-            }, (tab: string) => tab)
-          }
-          .width('100%')
-          .height(40)
-          .onAreaChange((oldValue: Area, newValue: Area) => {
-            const w: number = Number(newValue.width);
-            this.measureTabs(w);
-          })
-        }
-        .width('100%')
-        .height(48)
-        .padding(4)
-        .backgroundColor(this.col('barBg'))
-        .borderRadius(12)
-        .margin({ top: 2, bottom: 8 })
+        // 底部三 Tab：系统默认 BottomTabBarStyle（图标在上、文字在下，选中态由系统着色）
+        this.navTabs()
       }
       .width(this.sidebarVp)
       .height('100%')

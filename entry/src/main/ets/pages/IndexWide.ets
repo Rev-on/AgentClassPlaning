@@ -46,9 +46,8 @@ export struct IndexWide {
   @State paneIn: boolean = true;
   /** 左栏卡片网格过渡（切换页签时淡入 + 左移） */
   @State gridIn: boolean = true;
-  /** 底部页签高亮选择块：单格宽度与当前偏移（vp，onAreaChange 测量后生效） */
-  @State tabSlot: number = 0;
-  @State tabOff: number = 0;
+  /** 左栏 Tabs 当前索引（由 navTab 派生并回写，保持系统页签选中态同步） */
+  @State tabsIndex: number = 0;
   /** 左侧栏宽度：由 LayoutPolicy 按设备形态给出（三折叠/阔折叠更宽），缺省 400 */
   @StorageProp('appSidebarVp') sidebarVp: number = 400;
 
@@ -152,22 +151,47 @@ export struct IndexWide {
     return 0;
   }
 
-  /** 测量底部页签容器宽度：计算选择块单格宽度并定位当前偏移 */
-  private measureTabs(width: number): void {
-    if (width <= 0) {
-      return;
+  /** 页签索引反查（0/1/2 → assistant/family/mine） */
+  private tabNameOf(idx: number): string {
+    if (idx === 1) {
+      return 'family';
     }
-    const slot: number = width / 3;
-    this.tabSlot = slot;
-    this.tabOff = this.tabIndexOf(this.navTab) * slot;
+    if (idx === 2) {
+      return 'mine';
+    }
+    return 'assistant';
   }
 
-  /** 切换页签：左栏网格与右栏内容带过渡，右栏切到该页签首个工具 */
+  /**
+   * 系统默认底部导航项：BottomTabBarStyle(icon, text)。
+   *
+   * 为什么改成系统默认：
+   *   原实现是手写的 Stack 滑动高亮块（#E8F1FB）+ 纯文字页签，
+   *   既没有图标，也没有系统的选中态与点击动效，观感与鸿蒙系统应用不一致。
+   *   BottomTabBarStyle 是 ArkUI 内置的底部导航样式：**图标在上、文字在下**，
+   *   选中态/着色/动效/深浅色适配全部由系统接管
+   *   （API 见 SDK 的 component/tab_content.d.ts）。
+   *
+   * 图标用系统内置符号资源 `$r('sys.symbol.*')`，不新增图片文件。
+   * 符号名取自 SDK 资源索引 toolchains/id_defined.json，均已确认存在：
+   *   house · message · person
+   *
+   * 当前页由 Tabs 构造参数的 `index: this.tabsIndex` 指定，
+   * 并靠 `.onChange()` 回写 tabsIndex 保持同步（TabsAttribute 上不存在 `.index()`）。
+   */
+  private bottomStyle(icon: string, textKey: string): BottomTabBarStyle {
+    return BottomTabBarStyle.of($r('sys.symbol.' + icon), this.t(textKey));
+  }
+
+  /**
+   * 切换页签：左栏网格与右栏内容带过渡，右栏切到该页签首个工具。
+   * 同时把 tabsIndex 与系统的系统页签选中态对齐。
+   */
   private switchTab(tab: string): void {
+    this.tabsIndex = this.tabIndexOf(tab);
     if (this.navTab === tab) {
       return;
     }
-    const idx: number = this.tabIndexOf(tab);
     this.paneIn = false;
     this.gridIn = false;
     this.navTab = tab;
@@ -179,10 +203,6 @@ export struct IndexWide {
       animateTo({ duration: 260, curve: Curve.EaseOut }, () => {
         this.paneIn = true;
         this.gridIn = true;
-        if (this.tabSlot > 0) {
-          // 底部高亮选择块平滑滑到新页签
-          this.tabOff = idx * this.tabSlot;
-        }
       });
     }, 40);
   }
@@ -271,83 +291,84 @@ export struct IndexWide {
     .onClick(() => this.pick(entry))
   }
 
+  /** 左栏单个页签内容：当前页签标题 + 功能入口卡片网格（可滚动） */
+  @Builder
+  tabPane(tab: string) {
+    Column() {
+      // 当前页签标题
+      Row() {
+        Text(this.t(this.groupOf(tab).tabKey))
+          .fontFamily(AppFonts.family())
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.col('title'))
+        Blank()
+        Text($r('app.string.app_name'))
+          .fontFamily(AppFonts.family())
+          .fontSize(12)
+          .fontColor(this.col('faint'))
+      }
+      .width('100%')
+      .padding({ left: 4, right: 4, top: 14, bottom: 6 })
+
+      // 当前页签的功能入口（两列紧凑卡片；可滚动区域吸收剩余高度）
+      Scroll() {
+        Grid() {
+          ForEach(this.groupOf(tab).entries, (entry: NavEntry) => {
+            GridItem() {
+              this.toolCard(entry)
+            }
+          }, (entry: NavEntry) => entry.id)
+        }
+        .columnsTemplate('1fr 1fr')
+        .columnsGap(10)
+        .rowsGap(10)
+        .width('100%')
+        .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .scrollBar(BarState.Off)
+      .opacity(this.gridIn ? 1 : 0)
+      .translate({ x: this.gridIn ? 0 : -18 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
   build() {
     Row() {
       // ============ 左栏：加宽的手机式三 Tab 面板 ============
       Column() {
-        // 当前页签标题
-        Row() {
-          Text(this.t(this.groupOf(this.navTab).tabKey))
-            .fontFamily(AppFonts.family())
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.col('title'))
-          Blank()
-          Text($r('app.string.app_name'))
-            .fontFamily(AppFonts.family())
-            .fontSize(12)
-            .fontColor(this.col('faint'))
-        }
-        .width('100%')
-        .padding({ left: 4, right: 4, top: 14, bottom: 6 })
-
-        // 当前页签的功能入口（两列紧凑卡片；可滚动区域吸收剩余高度，底部页签固定）
-        Scroll() {
-          Grid() {
-            ForEach(this.groupOf(this.navTab).entries, (entry: NavEntry) => {
-              GridItem() {
-                this.toolCard(entry)
-              }
-            }, (entry: NavEntry) => entry.id)
+        // 系统默认底部导航：Tabs 放在左栏内，barPosition=End 使其贴左栏底部
+        Tabs({ barPosition: BarPosition.End, index: this.tabsIndex }) {
+          TabContent() {
+            this.tabPane('assistant')
           }
-          .columnsTemplate('1fr 1fr')
-          .columnsGap(10)
-          .rowsGap(10)
-          .width('100%')
-          .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+          .tabBar(this.bottomStyle('house', 'tab.assistant'))
+
+          TabContent() {
+            this.tabPane('family')
+          }
+          .tabBar(this.bottomStyle('message', 'tab.family'))
+
+          TabContent() {
+            this.tabPane('mine')
+          }
+          .tabBar(this.bottomStyle('person', 'tab.mine'))
         }
         .layoutWeight(1)
         .width('100%')
-        .scrollBar(BarState.Off)
-        .opacity(this.gridIn ? 1 : 0)
-        .translate({ x: this.gridIn ? 0 : -18 })
-
-        // 底部三 Tab：选中高亮块在页签间平滑滑动
-        Stack({ alignContent: Alignment.Start }) {
-          // 滑动高亮块
-          Column()
-            .width(this.tabSlot)
-            .height(40)
-            .borderRadius(10)
-            .backgroundColor('#E8F1FB')
-            .offset({ x: this.tabOff })
-          // 页签文字
-          Row() {
-            ForEach(['assistant', 'family', 'mine'], (tab: string) => {
-              Text(this.t(this.groupOf(tab).tabKey))
-                .fontFamily(AppFonts.family())
-                .fontSize(13)
-                .fontColor(this.navTab === tab ? '#4A90D9' : this.col('hint'))
-                .fontWeight(this.navTab === tab ? FontWeight.Bold : FontWeight.Normal)
-                .textAlign(TextAlign.Center)
-                .layoutWeight(1)
-                .height(40)
-                .onClick(() => this.switchTab(tab))
-            }, (tab: string) => tab)
-          }
-          .width('100%')
-          .height(40)
-          .onAreaChange((oldValue: Area, newValue: Area) => {
-            const w: number = Number(newValue.width);
-            this.measureTabs(w);
-          })
-        }
-        .width('100%')
-        .height(48)
-        .padding(4)
-        .backgroundColor(this.col('barBg'))
-        .borderRadius(12)
-        .margin({ top: 2, bottom: 8 })
+        .height('100%')
+        .barBackgroundColor(this.col('barBg'))
+        .barHeight(56)
+        .barMode(BarMode.Fixed)
+        .scrollable(false)
+        .onChange((index: number) => {
+          // 用户点系统页签：同步索引并复用既有切换逻辑（右栏内容 / 过渡动画）
+          this.tabsIndex = index;
+          this.switchTab(this.tabNameOf(index));
+        })
       }
       .width(this.sidebarVp)
       .height('100%')

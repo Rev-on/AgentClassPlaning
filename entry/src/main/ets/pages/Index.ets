@@ -1,6 +1,10 @@
 /**
  * 主界面：底部三 Tab（支持五语言与深浅主题）
  *  备课助手 / 家校沟通 / 我的（历史记录、设置、班级管理等入口）
+ *
+ * 底部导航使用**系统默认样式** BottomTabBarStyle（图标在上、文字在下），
+ * 图标取系统内置符号资源 sys.symbol.{house,message,person}，不额外引入图片。
+ * 平板/横屏 与 2in1 分屏形态分别由 IndexWide / IndexWideDuo 渲染，风格一致。
  */
 import router from '@ohos.router';
 import common from '@ohos.app.ability.common';
@@ -199,6 +203,8 @@ struct Index {
   @StorageProp('appWideLayout') wideLayout: boolean = false;
   /** 2in1 全屏上下分屏模式（仅华为 2in1 且磁吸键盘未连接时启用） */
   @StorageProp('appDuo') @Watch('onDuoModeChanged') appDuo: boolean = false;
+  /** 当前选中的底部页签序号（0=备课助手 / 1=家校沟通 / 2=我的），驱动页签选中态 */
+  @State tabsIndex: number = 0;
   private win: window.Window | undefined = undefined;
   /** 跨轴铺窗（瀑布模式）是否正在执行 / 已生效：用于去重与防抖 */
   private spanBusy: boolean = false;
@@ -215,11 +221,32 @@ struct Index {
     autoCancel: false
   });
 
+  /**
+   * 系统默认底部导航项：BottomTabBarStyle(icon, text)。
+   *
+   * 为什么改成系统默认：
+   *   原实现 `.tabBar('文字')` 只传字符串，是"纯文字页签"—— 没有图标，
+   *   也没有系统的选中态与点击动效，观感与鸿蒙系统应用不一致。
+   *   BottomTabBarStyle 是 ArkUI 内置的底部导航样式：**图标在上、文字在下**，
+   *   选中态/着色/动效/深浅色适配全部由系统接管
+   *   （API 见 SDK 的 component/tab_content.d.ts）。
+   *
+   * 图标用系统内置符号资源 `$r('sys.symbol.*')`，不新增图片文件。
+   * 符号名取自 SDK 资源索引 toolchains/id_defined.json，均已确认存在：
+   *   house · message · person
+   *
+   * 选中/未选中由 Tabs 按当前索引自动着色；当前页由 Tabs 构造参数的
+   * `index: this.tabsIndex` 指定，并靠 `.onChange()` 回写 tabsIndex 保持同步。
+   * 这里不手工替换图标，避免与系统动效打架。
+   */
+  private bottomStyle(icon: string, textKey: string): BottomTabBarStyle {
+    return BottomTabBarStyle.of($r('sys.symbol.' + icon), this.t(textKey));
+  }
+
   /** 问候大字当前可见文本（打字机逐字展开；语言切换后按新词典续显） */
   private shownBig(): string {
     return I18n.t(this.greetBigKey).slice(0, this.greetBigLen);
   }
-
   /** 问候小字当前可见文本 */
   private shownSmall(): string {
     return I18n.t(this.greetSmallKey).slice(0, this.greetSmallLen);
@@ -591,7 +618,7 @@ struct Index {
       .width('100%')
       .height('100%')
     } else {
-    Tabs({ barPosition: BarPosition.End }) {
+    Tabs({ barPosition: BarPosition.End, index: this.tabsIndex }) {
       // ============ Tab1 备课助手 ============
       TabContent() {
         Scroll() {
@@ -673,7 +700,7 @@ struct Index {
         .height('100%')
         .backgroundColor(this.col('bg'))
       }
-      .tabBar(this.t('tab.assistant'))
+      .tabBar(this.bottomStyle('house', 'tab.assistant'))
 
       // ============ Tab2 家校沟通 ============
       TabContent() {
@@ -726,7 +753,7 @@ struct Index {
         .height('100%')
         .backgroundColor(this.col('bg'))
       }
-      .tabBar(this.t('tab.family'))
+      .tabBar(this.bottomStyle('message', 'tab.family'))
 
       // ============ Tab3 我的 ============
       TabContent() {
@@ -794,13 +821,18 @@ struct Index {
         .height('100%')
         .backgroundColor(this.col('bg'))
       }
-      .tabBar(this.t('tab.mine'))
+      .tabBar(this.bottomStyle('person', 'tab.mine'))
     }
     .width('100%')
     .height('100%')
+    // 系统默认导航栏外观：背景/高度/分割线交给系统，仅保留主题背景色同步
     .barBackgroundColor(this.col('barBg'))
     .barHeight(56)
+    .barMode(BarMode.Fixed)
     .scrollable(false)
+    .onChange((index: number) => {
+      this.tabsIndex = index;
+    })
     .backgroundColor(this.col('bg'))
     }
   }
