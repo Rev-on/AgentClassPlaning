@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001A181B0920BA3909454EA0937E68C3D9677A98EFFF18D71F78C13E0A59CB5401CA200A98C455F6",
-          "profile": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.p7b",
+          "storeFile": "F:/keys/Release.p12",
+          "storePassword": "0000001A735459CDE1CA2FFB68D743940A9039FABCE4C49AADDA7969757570C4DAA1D75416C3A236F74B",
+          "keyAlias": "agent",
+          "keyPassword": "0000001A266CA41EF8F0ACC7555778F799E3C68D8AEE325F46F03B75314C071DC6E6A2DD573490B7C168",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\laoyu\\.ohos\\config\\default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.p12",
-          "storePassword": "0000001A4C98C5AB8B12615DB59F77D280450A5CF1C3540C67C2C7E8F0A8D15D263F5630D8DC28F9D6F5"
+          "profile": "F:/keys/finalRelease.p7b",
+          "certpath": "F:/keys/正式发布.cer"
         }
       }
     ],
