@@ -453,6 +453,108 @@ const feedSubs = new Map();
 /** taskId -> 运行中已累积的思考文本（深度思考；供 feed 重连时补齐） */
 const taskReasoning = new Map();
 
+/* ===================== 实况窗进度：服务端侧持续推进 ===================== */
+
+/**
+ * 为什么要有这一段（用户需求的核心）：
+ *   实况窗（Live View）默认由 App 自己用 liveViewManager.updateLiveView 本地更新，
+ *   而本地更新的前提是 **App 进程活着**。用户把应用退到后台后进程可能被挂起，
+ *   甚至被系统回收 —— 此时客户端更新链路彻底断掉，桌面实况窗的进度条就卡住不动。
+ *   任务其实还在服务端跑，因此由**服务端**通过 Push Kit（push-type 7 / operation 1）
+ *   补推进度更新，系统直接刷新实况窗，不依赖 App 进程存活。
+ */
+
+/**
+ * 任务运行时状态（仅内存，不落盘）。
+ *
+ * 为什么不写进 tasks.json：进度推送是**纯运行时行为**，写盘既无必要（进程重启后
+ * 任务本来就不再运行、也不会再推），又会让 flushPersist/防抖快照多出一堆噪声字段。
+ * 附件 base64（taskAttachments）与思维链（taskReasoning）出于同样理由只驻内存。
+ */
+const liveViewFeedback = new Map(); // taskId -> { content, reasoning, startedAt }
+
+/** 节流游标（任务结束/被删除时必须 reset，否则内存泄漏） */
+const liveViewThrottle = push.createThrottle();
+
+/**
+ * 尝试为任务推送一次实况窗进度。
+ *
+ * 容错原则（与既有通知/实况窗逻辑一致）：
+ *   - **绝不抛出**：任何异常只写 console 日志。实况窗是锦上添花，
+ *     不能因为推送失败影响任务生成本身。
+ *   - **未配置凭据静默跳过**：push.configured() 为 false 时什么都不发
+ *     （sendLiveViewUpdate 内部还会再兜一次底）。
+ *   - **只在真正开推时才需要 token**：未绑实况窗的任务连设备查询都不做，
+ *     避免每次增量都白跑一遍 listDevices()。
+ *
+ * 与客户端的分工：
+ *   客户端进程活着时由它本地更新（粒度更细，约 2s 一次）；服务端在节流窗口到期时补推。
+ *   两端写入的是**同一个进度条**，因此公式必须逐项一致 —— 否则服务端一推就把
+ *   客户端刚推进的进度**往回拉**（曾因正文基线差 5pp 真实发生过，
+ *   详见 push.js estimatePercent 的注释与 test_liveview_progress.js 的跨端断言）。
+ */
+function maybeSendLiveViewUpdate(taskId, task) {
+  if (!PUSH_ENABLED) {
+    // 与完成通知共用同一总开关：PUSH_ENABLED 未开时连推送分支都不进
+    //（排查时"日志里完全没有实况窗字样"就是这一条）
+    return;
+  }
+  try {
+    if (!task || !task.liveView) {
+      return; // 客户端未上报实况窗（未创建/创建失败），无需推送
+    }
+    if (!push.configured()) {
+      return; // 未配置 AGC 凭据：静默跳过
+    }
+    const st = liveViewFeedback.get(taskId);
+    if (!st) {
+      return; // 尚未开始生成
+    }
+    const pct = push.estimatePercent(task, st);
+    const decision = liveViewThrottle.consider(taskId, pct, Date.now());
+    if (!decision.send) {
+      return; // 节流：太频繁 / 进度未前进 / 配额用尽
+    }
+    const token = tasks.tokenOf(task.deviceId);
+    if (!token) {
+      // 设备 Push Token 缺失（未上报或已被清理）：跳过。
+      // 注意游标已被 consider() 推进 —— 这是有意的：若这里回滚游标，
+      // 后续每个增量都会重算一遍，等于把节流关掉了。
+      console.warn('[push] 无 Push Token，跳过实况窗进度推送 deviceId=' + task.deviceId);
+      return;
+    }
+    if (!st.dispatched) {
+      st.dispatched = true;
+      // 只打一次：生成过程中增量回调极多，逐条打日志会把日志刷爆
+      console.log('[rev-ai-proxy] 实况窗进度推送已启用 taskId=' + taskId
+        + ' activityId=' + task.liveView.activityId
+        + ' 最小间隔=' + push.liveViewConfig.MIN_UPDATE_MS + 'ms');
+    }
+    push.sendLiveViewUpdate({
+      token: token,
+      activityId: task.liveView.activityId,
+      // 与创建实况窗时实际生效的 event 一致；缺省 TIMER
+      //（PROGRESS 是布局类型不是场景名，传它会被华为拒收）
+      event: task.liveView.event || 'TIMER',
+      percent: decision.percent,
+      title: task.label
+    }).catch((e) => {
+      // sendLiveViewUpdate 内部已兜底不抛，这里是第二道保险
+      console.error('[push] 实况窗进度推送失败 taskId=' + taskId + ' err='
+        + String((e && e.message) || e));
+    });
+  } catch (e) {
+    console.error('[push] 实况窗进度调度异常 taskId=' + taskId + ' err='
+      + String((e && e.message) || e));
+  }
+}
+
+/** 任务结束（完成/失败/取消）时释放该任务的实况窗运行时状态 */
+function liveViewFeedbackDone(taskId) {
+  liveViewFeedback.delete(taskId);
+  liveViewThrottle.reset(taskId);
+}
+
 /**
  * 任务被过期清理时，同步释放以 taskId 为键的旁挂内存 Map。
  *
@@ -466,6 +568,7 @@ tasks.setTaskPurgeHook((taskId) => {
   taskAttachments.delete(taskId);
   taskReasoning.delete(taskId);
   taskAborters.delete(taskId);
+  liveViewFeedback.delete(taskId); // 实况窗进度节流游标
   feedClose(taskId); // 内部会 res.end() 所有订阅连接并删除 feedSubs 中的键
 });
 
@@ -536,6 +639,16 @@ async function fetchDeepSeekStreamed(task, onDelta, onThink) {
       onDelta(piece);
     }
   };
+  // 实况窗进度推送的"心跳"：随 150ms 的增量 flush 一起走。
+  // 放在这里而不是每个 delta 上，是为了复用同一个节拍、且天然按节流窗口合并。
+  const flushLiveView = () => {
+    const st = liveViewFeedback.get(task.id);
+    if (st) {
+      st.content = full;
+      st.reasoning = reason;
+    }
+    maybeSendLiveViewUpdate(task.id, tasks.get(task.id) || task);
+  };
   try {
     const atts = taskAttachments.get(task.id) || [];
     // 新课标依据：题目/备注 -> 学科索引路由 -> 内容索引检索
@@ -588,6 +701,7 @@ async function fetchDeepSeekStreamed(task, onDelta, onThink) {
     }
     const reader = resp.body.getReader();
     const flushTimer = setInterval(flushRemain, 150);
+    const lvTimer = setInterval(flushLiveView, 3000);
     try {
       for (;;) {
         const { done, value } = await reader.read();
@@ -632,6 +746,7 @@ async function fetchDeepSeekStreamed(task, onDelta, onThink) {
       }
     } finally {
       clearInterval(flushTimer);
+      clearInterval(lvTimer);
     }
     flushRemain();
     if (full.trim() === '') {
@@ -665,6 +780,10 @@ function runTask(taskId) {
   tasks.enqueue(async () => {
     tasks.patch(taskId, { status: tasks.STATUS.RUNNING });
     taskReasoning.set(taskId, '');
+    // 初始化实况窗进度状态：
+    // startedAt 用于"既无思考也无正文"时的按时间线性推进 —— 客户端进程被挂起/杀掉后，
+    // 服务端仍能靠时间给出一个不动的进度，而不是永远停在 0%。
+    liveViewFeedback.set(taskId, { content: '', reasoning: '', startedAt: Date.now(), dispatched: false });
     try {
       const res = await fetchDeepSeekStreamed(task,
         (d) => feedSend(taskId, 'chunk', { d: d }),
@@ -675,6 +794,27 @@ function runTask(taskId) {
         });
       const content = res.content;
       const reasoning = res.reasoning || taskReasoning.get(taskId) || '';
+      // 结束前补推一次最终进度：长文本常常"最后一波增量还没到节流窗口就结束了"，
+      // 不补这一下，实况窗会停在 60% 之类的位置直接被结束消息收掉。必须 await：
+      // 否则结束消息（operation 2）可能先于更新（operation 1）到达，顺序颠倒。
+      if (task.liveView) {
+        const fin = liveViewFeedback.get(taskId);
+        if (fin) {
+          fin.content = content;
+          fin.reasoning = reasoning;
+        }
+        const finPct = push.estimatePercent(task, fin || { content: content, reasoning: reasoning });
+        const finToken = tasks.tokenOf(task.deviceId);
+        if (PUSH_ENABLED && push.configured() && finToken && finPct > 0) {
+          await push.sendLiveViewUpdate({
+            token: finToken,
+            activityId: task.liveView.activityId,
+            event: task.liveView.event || 'TIMER',
+            percent: finPct,
+            title: task.label
+          }).catch(() => { /* 兜底：失败不影响任务完成 */ });
+        }
+      }
       tasks.patch(taskId, {
         status: tasks.STATUS.DONE,
         content: content,
@@ -687,13 +827,17 @@ function runTask(taskId) {
       feedSend(taskId, 'done', { c: content, r: reasoning });
       feedClose(taskId);
       taskReasoning.delete(taskId);
+      liveViewFeedbackDone(taskId);
       // 完成通知（默认关闭：客户端已取消消息通知功能；仅当 PUSH_ENABLED=1 时启用）
       if (PUSH_ENABLED) {
         if (task.liveView) {
           await push.sendLiveViewEnd({
             token: tasks.tokenOf(task.deviceId),
             activityId: task.liveView.activityId,
-            event: task.liveView.event || 'PROGRESS'
+            // 与客户端创建实况窗时实际生效的 event 保持一致。
+            // 默认值用 'TIMER'（客户端 EVENTS 首选场景），而非 'PROGRESS'
+            // —— PROGRESS 是**布局类型**不是场景名，传它会被华为拒收。
+            event: task.liveView.event || 'TIMER'
           }).catch((e) => console.error('[tasks] liveview end 失败: ' + String(e && e.message || e)));
         }
         await pushToDevice(task.deviceId, {
@@ -717,6 +861,9 @@ function runTask(taskId) {
       feedSend(taskId, cancelled ? 'cancelled' : 'error', { m: msg });
       feedClose(taskId);
       taskReasoning.delete(taskId);
+      // 失败/取消不推"100%"：实况窗最终进度由客户端的 error 事件自行处理；
+      // 服务端只负责清理节流状态，避免该 taskId 的游标常驻内存。
+      liveViewFeedbackDone(taskId);
       if (PUSH_ENABLED) {
         await pushToDevice(task.deviceId, {
           notifyId: task.notifySeed,
@@ -857,7 +1004,20 @@ app.get('/api/task/:id', checkToken, (req, res) => {
   res.json({ ok: true, task: task });
 });
 
-// 上报：客户端已为任务创建实况窗（完成时服务端据此结束实况窗）
+/**
+ * 上报：客户端已为任务创建实况窗。
+ *
+ * 服务端据此做两件事：
+ *   ① 生成**进行中**按节奏推实况窗进度（push-type 7 / operation 1），
+ *      保证 App 进程被挂起或杀掉后进度条仍能推进；
+ *   ② 任务**完成**时下发结束消息（operation 2），清理可能残留的实况窗。
+ *
+ * 可选字段（向后兼容，全部可缺省 —— 旧客户端只传 activityId/event 也照常工作）：
+ *   totalChars      本次生成**预期**的正文总字符数。服务端不掌握客户端的
+ *                   EXPECT_CHARS 表，拿到它才能算出与客户端一致的进度百分比；
+ *                   缺省时退化为按时间线性推进。
+ *   expectedMinutes 预期生成时长（分钟），同样是缺省时的兜底依据。
+ */
 app.post('/api/task/:id/liveview', checkToken, (req, res) => {
   const task = tasks.get(req.params.id);
   if (!task) {
@@ -870,13 +1030,42 @@ app.post('/api/task/:id/liveview', checkToken, (req, res) => {
     res.status(400).json({ error: { message: 'activityId 无效' } });
     return;
   }
+  // totalChars / expectedMinutes 都是**可选**字段。
+  // 语义要分清："没传"要区分"老客户端压根不知道这个概念" 与 "新客户端明确说不知道"，
+  // 因此保留字段是否出现的布尔量，而不是把两者都压成 0 —— 后者会让日志无法区分
+  // "客户端没上报"和"客户端上报了一个无效值"，排查时很容易误判。
+  const hasTotalChars = body.totalChars !== undefined && body.totalChars !== null;
+  const hasExpectedMinutes = body.expectedMinutes !== undefined && body.expectedMinutes !== null;
+  const totalChars = Number(body.totalChars) || 0;
+  const expectedMinutes = Number(body.expectedMinutes) || 0;
+  const event = typeof body.event === 'string' && body.event !== '' ? body.event : 'TIMER';
+  const prev = task.liveView || {};
   tasks.patch(task.id, {
     liveView: {
+      // activityId 是定位实况窗的唯一依据，必须以本次上报为准
       activityId: activityId,
-      event: typeof body.event === 'string' && body.event !== '' ? body.event : 'PROGRESS'
+      // 场景名必须与客户端创建时一致；客户端未传时用其首选场景 TIMER
+      //（PROGRESS 是布局类型，不是合法场景名）
+      event: event,
+      // 被华为拒收时服务端会打 `[push] 实况窗消息失败 ... body=` 日志，
+      // 届时再按报错删字段即可（真机联调待办，见 task-2 汇报）。这里显式落一个
+      // 标记位，便于线上排查"到底发的是哪一版报文"。
+      rejectedFields: Array.isArray(prev.rejectedFields) ? prev.rejectedFields : [],
+      // 非正数一律落 0（= 未提供），避免误配把进度估算拉到 0% 或除零。
+      // 已上报过的值不因后续省略而被清掉。
+      totalChars: totalChars > 0 ? totalChars : Number(prev.totalChars) || 0,
+      expectedMinutes: expectedMinutes > 0 ? expectedMinutes : Number(prev.expectedMinutes) || 0
     }
   });
-  res.json({ ok: true });
+  console.log('[rev-ai-proxy] 实况窗已绑定 taskId=' + task.id
+    + ' activityId=' + activityId
+    + ' event=' + event
+    + ' totalChars=' + (totalChars > 0 ? totalChars
+      : (hasTotalChars ? '无效(' + JSON.stringify(body.totalChars) + ')' : '未上报->按类型默认'))
+    + ' expectedMinutes=' + (expectedMinutes > 0 ? expectedMinutes
+      : (hasExpectedMinutes ? '无效' : '未上报->按类型默认'))
+    + '（进行中进度将由服务端补推）');
+  res.json({ ok: true, progressPush: PUSH_ENABLED });
 });
 
 // 按设备列出最近任务

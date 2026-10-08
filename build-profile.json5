@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "storeFile": "F:/keys/Release.p12",
-          "storePassword": "0000001A735459CDE1CA2FFB68D743940A9039FABCE4C49AADDA7969757570C4DAA1D75416C3A236F74B",
-          "keyAlias": "agent",
-          "keyPassword": "0000001A266CA41EF8F0ACC7555778F799E3C68D8AEE325F46F03B75314C071DC6E6A2DD573490B7C168",
+          "storeFile": "C:/Users/laoyu/.ohos/config/default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.p12",
+          "storePassword": "0000001B0F1AB142DB816D184EA7E06C36E7E5A43D418C10B601E8F77AA6CAA8464CB23B6C2056117661E3",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B3BBAD60834428232DA60692B9C6A95D21CAF81771D3CC2258B3109FA4D65B8D1C7A8F782A735C7",
           "signAlg": "SHA256withECDSA",
-          "profile": "F:/keys/finalRelease.p7b",
-          "certpath": "F:/keys/正式发布.cer"
+          "profile": "F:/debug/aaaDebug.p7b",
+          "certpath": "C:/Users/laoyu/.ohos/config/default_Rev_Techingmaster_oacL69Vqh9IWpM9xGZylr24FeFUQeNHsgIHRrNGzvHw=.cer"
         }
       }
     ],
@@ -36,6 +36,17 @@
       },
       {
         "name": "release"
+      }
+    ],
+    "capabilities": [
+      {
+        "bundleName": "com.rev.myapplication",
+        "config": [
+          {
+            "name": "Live View Kit",
+            "capability": "com.huawei.service.liveView.entry"
+          }
+        ]
       }
     ]
   },

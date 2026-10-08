@@ -91,10 +91,27 @@ export class GenTask {
   private static cachedDev: string = '';
 
   private static api(path: string): string {
+    return GenTask.apiUrl(path);
+  }
+
+  /**
+   * 服务端接口绝对地址。
+   *
+   * 对外开放的原因：实况窗后台续更（LiveView.pump）需要在**后台短时窗口**里
+   * 用极短超时拉一次任务态，而 GenTask.fetchTask 固定 15s readTimeout ——
+   * 一个慢请求就会吃掉整个短时额度。因此 LiveView 自建轻量请求，但复用
+   * 同一份 base url / header 规则，避免两处硬编码漂移。
+   */
+  static apiUrl(path: string): string {
     return ApiConfig.SERVER_BASE_URL + path;
   }
 
   private static headers(): Record<string, string> {
+    return GenTask.httpHeaders();
+  }
+
+  /** 统一的请求头（含代理 token）；同样供 LiveView 后台探测复用 */
+  static httpHeaders(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
     if (ApiConfig.PROXY_TOKEN !== '') {
       h['x-proxy-token'] = ApiConfig.PROXY_TOKEN;

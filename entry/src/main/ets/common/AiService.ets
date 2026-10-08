@@ -15,6 +15,7 @@ import { SseClient, SseEvent, SseListener } from './SseClient';
 import { AttachFile, TaskAttachment } from './AttachTypes';
 import { AttachService } from './AttachService';
 import { RichHtml } from './RichHtml';
+import { LiveView } from './LiveView';
 import { I18n } from './I18n';
 
 /** 对话消息 */
@@ -271,6 +272,11 @@ export class AiService {
       opts.attachments, opts.thinking === true);
     // 提交成功：服务端已接受任务并开始生成，此后任何任务态失败都不应回退直连重发
     ctl.accepted = true;
+    // 实况窗补绑：LiveView 在"生成开始"时已创建（此刻才有 taskId）。
+    // 绑定后若本进程在生成途中被系统杀掉，服务端任务完成时会用 push-type 7
+    // 结束这个残留的实况窗（否则它会一直挂在状态栏显示"生成中"）。
+    // 失败静默：实况窗是增强体验，不影响生成。
+    LiveView.bindTask(taskId);
     // 登记到活动表：页面点"停止生成"时据此断开流并取消服务端任务
     const existing: ActiveGen | undefined = AiService.active.get(opts.type);
     const act: ActiveGen = existing !== undefined ? existing : { taskId: taskId, sse: null, stopped: false };

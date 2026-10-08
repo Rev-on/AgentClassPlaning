@@ -82,15 +82,35 @@
 <body>
 <div class="wrap">
 
-  <h1><span class="dot"></span>实况窗（PROGRESS）接入方案图</h1>
+  <h1><span class="dot"></span>实况窗（进度类型）接入方案图</h1>
   <div class="sub">Rev TechingMaster · AI 生成任务 · Live View Kit「进度类型」合规接入 · 2026-09</div>
 
   <div class="kpis">
-    <div class="kpi"><b>EVENT</b>PROGRESS</div>
+    <div class="kpi"><b>场景名</b>TIMER（≠ PROGRESS）</div>
     <div class="kpi"><b>布局</b>LAYOUT_TYPE_PROGRESS</div>
-    <div class="kpi"><b>ID 统一</b>seed = liveView id = notifyId</div>
-    <div class="kpi"><b>通道</b>本地创建 + Push 结束 + Alert 通知</div>
-    <div class="kpi"><b>兜底</b>进行中普通通知</div>
+    <div class="kpi"><b>ID</b>activityId 由客户端自生成</div>
+    <div class="kpi"><b>通道</b>本地创建 + Push 更新/结束</div>
+    <div class="kpi"><b>后台</b>看门狗 + 短时任务续更</div>
+  </div>
+
+  <div class="card" style="margin-top:14px; border-color:var(--warn);">
+    <div class="note" style="margin-top:0;">
+      <b>⚠️ 勘误（2026-10 更新，以本节为准）：</b>
+      本图早期版本把 <code>event</code> 写成了 <b>PROGRESS</b>，这是<b>错的</b> ——
+      <code>PROGRESS</code> 是<b>布局类型</b>（<code>LAYOUT_TYPE_PROGRESS</code>，
+      用于 <code>liveViewData.primary.layoutData</code>），<b>不是</b>合法<b>场景名</b>，
+      直接传它会被华为拒收（<code>80100003</code>）。
+      实际实现按 <code>TIMER → RENT → WORKOUT → …</code> 依次试探 <b>14 个合法场景</b>，
+      首个成功者被记住并复用（见 <code>LiveView.ets</code> 的 <code>EVENTS</code>）。
+      同理，<b>activityId 必须由客户端自己生成</b>（<code>Date.now() % 2147483647</code>）——
+      SDK 的 <code>LiveViewResult</code> 只回 <code>resultCode</code>/<code>message</code>，
+      <b>不含任何 id</b>。<br>
+      <b>另：</b>下面提到的"降级为普通通知"与"ID 三合一（= notifyId）"属早期方案，
+      当前实现<b>未采用</b>：降级路径为"静默不显示实况窗，生成照常"，
+      且 <code>GenTask.ets</code> 已注明取消消息通知功能。
+      进度展示的真实链路见
+      <a href="实况窗后台进度功能说明.md" style="color:var(--brand);">实况窗后台进度功能说明.md</a>。
+    </div>
   </div>
 
   <h2><span class="tag">A</span>总体链路（泳道）</h2>

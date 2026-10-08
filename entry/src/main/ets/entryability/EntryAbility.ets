@@ -10,12 +10,19 @@ import { AppTheme } from '../common/AppTheme';
 import { ContinuationService } from '../common/ContinuationService';
 import { PushToken } from '../common/PushToken';
 import { NotifySlot } from '../common/NotifySlot';
+import { LiveView } from '../common/LiveView';
 
 const DOMAIN = 0x0000;
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+    // 实况窗 / 后台短时任务需要 UIAbilityContext：
+    //   liveViewManager 是系统代理，对调用方有 UIAbility 身份校验；
+    //   requestSuspendDelay（短时任务）也要求传应用上下文。
+    // 这里在**最早时机**注入，之后即使生成过程中页面销毁，
+    // 后台看门狗仍持有有效 context（这是"退到后台仍能更新实况窗"的前提）。
+    LiveView.attach(this.context);
     // 分布式软总线流转接收：目标设备冷启动时从 Want 提取流转来的生成结果并写入收件箱
     ContinuationService.inboxFromWant(want);
     // 申请 Push Token 并上报服务端（失败静默，不影响启动）
@@ -36,8 +43,18 @@ export default class EntryAbility extends UIAbility {
     ContinuationService.inboxFromWant(want);
   }
 
+  /**
+   * 进程被系统终止。
+   *
+   * 实况窗本身由 SDK 的 lifeCycleMode=AUTO_STOP_WHEN_APP_TERMINATE 处理，
+   * 这里只负责把客户端侧的定时器/后台任务释放掉，避免任何残留资源。
+   * （框架不保证一定回调，LiveView.start 内部也会先收掉上一个未结束的实例。）
+   */
   onDestroy(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
+    LiveView.stop().catch((e: Error) => {
+      hilog.warn(DOMAIN, 'testTag', 'LiveView.stop 异常: %{public}s', e.message);
+    });
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {
@@ -150,10 +167,28 @@ export default class EntryAbility extends UIAbility {
     // 此时启动期的注册已因 1600004 失败过；用 ensureRetryable 在此补上
     // （内部失败会复位标记，保证下次进入前台仍会重试）。
     NotifySlot.ensureRetryable(this.context);
+    // 实况窗：回到前台 → 立刻按已流逝时间补齐进度（把后台挂起期间"欠"的百分比
+    // 补上），并把控制权交回页面回调；同时释放后台短时任务额度。
+    // 内部全程静默，失败绝不影响 UI。
+    LiveView.onForeground();
   }
 
+  /**
+   * 应用退到后台。
+   *
+   * 【为什么这里是核心接缝】
+   *   用户"把应用退出到后台"正是实况窗要发挥作用的场景。v1 在此处什么都没做：
+   *   实况窗虽然不会被结束，但**也没有任何人继续驱动它** —— 页面回调随进程
+   *   挂起而停止，进度于是永久冻结。本版通过 LiveView.onBackground()：
+   *     · 把应用标记为后台态（进度模型切到"时间滑轨主导"）；
+   *     · 确保与页面解耦的进度看门狗在运行；
+   *     · 申请**短时任务** requestSuspendDelay（无需权限，见 LiveView.ets 顶部
+   *       论证），争取后台运行窗口，让看门狗真的能把进度推出去。
+   *   **绝不在这里结束实况窗** —— 退出后台不是"生成结束"。
+   */
   onBackground(): void {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+    LiveView.onBackground();
   }
 }

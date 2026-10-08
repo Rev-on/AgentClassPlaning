@@ -43,8 +43,37 @@ AppScope/         应用级资源与图标（分层图标 layered_image）
 server/           AI 中转代理 + 新课标 RAG 索引
 Windows/          Electron 桌面版
 teching/          14 份《义务教育课程方案和课程标准（2022 年版）》PDF
-docs/             课件大纲 JSON 使用教程、实况窗接入方案图
+docs/             课件大纲 JSON 使用教程、实况窗接入方案图、实况窗后台进度功能说明
 ```
+
+## 实况窗：后台实时显示生成进度
+
+7 大 AI 功能生成中，用户**退到后台**后桌面实况窗（Live View Kit）
+持续实时显示进度，完成/失败/进程被杀均正确收尾。
+
+- **根因修复**：原进度链路为进程内回调驱动，退后台后进程被挂起 → 进度冻结。
+  改为 `max(阶段锚点, 时间滑轨)`：滑轨只依赖 `Date.now()`，重新被调度即按真实
+  流逝时间补齐。
+- **后台保持**：看门狗定时器（与页面解耦，2s）+ 短时任务
+  `requestSuspendDelay`（**无需权限**，`@since 9`）；`EntryAbility.onBackground`
+  只保持、**绝不结束**实况窗。
+- **进程被杀兜底**：服务端任务继续跑完 → push-type 7 结束实况窗 →
+  `GenTask.recover` 补结果入历史。
+- **跨端一致性**：服务端补推与客户端看门狗交替更新同一实况窗，两端公式
+  逐点一致（0pp），由三层断言锁死（数值/行为/根因）。
+- **零新增权限**：不申请 `KEEP_BACKGROUND_RUNNING`、不改 `module.json5`。
+
+详见 [`docs/实况窗后台进度功能说明.md`](docs/实况窗后台进度功能说明.md)。
+
+回归测试：
+
+```bash
+cd server
+node tools/test_liveview_contract.js     # 27 项
+node tools/test_liveview_background.js   # 95 项
+node tools/test_liveview_progress.js     # 193 项
+```
+
 
 ## 快速构建
 
