@@ -23,6 +23,7 @@ import { RichHtml } from '../common/RichHtml';
 import { SafeInsets } from '../common/SafeInsets';
 import { LiveView } from '../common/LiveView';
 import { StreamThrottle } from '../common/StreamThrottle';
+import { NameMask, NameMaskSession, MaskError } from '../common/NameMask';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出 */
@@ -196,8 +197,43 @@ export struct ReportContent {
     LiveView.start('report', this.t('page.report')).catch((e: Error) => {
       hilog.warn(0x0000, 'Report', 'LiveView.start 异常: %{public}s', e.message);
     });
-    const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
-    const user: string = `学生姓名：${this.studentName}\n班级：${this.className}\n各科成绩：${this.grades}\n课堂观察记录：${this.observation}\n\n请生成给家长的个性化学情报告。${remarkPart}`;
+    /**
+     * 【隐私】给学生真实姓名分配编号（张三 → S001）。
+     * 映射表只活在本方法内的会话对象里，生成结束（成功/失败/停止）随对象一起丢弃，
+     * 不落盘、不上传、不写日志。
+     * 登记后同步把输入框里的姓名换成编号：既避免这段过渡期把真名写进任何草稿，
+     * 也让生成结束后输入框与结果里的编号体例保持一致（真名在结果里，编号在原文里）。
+     */
+    const mask: NameMaskSession = NameMask.session();
+    const nameToken: string = NameMask.maskStructured(mask, this.studentName);
+    this.studentName = nameToken;
+    // 老师完全可能在"课堂观察记录/备注"自由文本里手写姓名：先按已知姓名兜底抹一遍
+    const observationMasked: string = NameMask.maskFreeText(mask, this.observation);
+    const remarkMasked: string = NameMask.maskFreeText(mask, this.remark);
+    // 成绩里也可能夹带姓名（如"张三 88"）：同样兜底
+    const gradesMasked: string = NameMask.maskFreeText(mask, this.grades);
+    const remarkPart: string = remarkMasked.trim() !== '' ? '\n【备注】' + remarkMasked.trim() : '';
+    const user: string = `学生姓名：${nameToken}\n班级：${this.className}\n各科成绩：${gradesMasked}\n课堂观察记录：${observationMasked}\n\n请生成给家长的个性化学情报告。${remarkPart}`;
+    /**
+     * 【隐私 fail-closed】出网前的最后一道闸：prompt 里只要还残留任何一个已知真实姓名，
+     * 立刻抛错阻断（宁可生成失败，也绝不把姓名发出去）。
+     * 本页没有"生成中实时替换正文"的需求，因此这里不传流式文本；
+     * 结果还原统一在完成时对**最终完整文本**做一次（见下方 mask.restore）。
+     */
+    try {
+      NameMask.applyToFlow(mask, Prompts.studentReportSystem(), user);
+    } catch (e) {
+      const me: MaskError = e as MaskError;
+      hilog.error(0x0000, 'Report', '脱敏校验未通过，已阻断外发: %{public}s', me.code);
+      this.loading = false;
+      this.thinkRunning = false;
+      this.thinkExpected = false;
+      LiveView.done().catch((er: Error) => {
+        hilog.warn(0x0000, 'Report', 'LiveView.done 异常: %{public}s', er.message);
+      });
+      promptAction.showToast({ message: this.t('err.maskFail') });
+      return;
+    }
     try {
       const content: string = await AiService.chat(Prompts.studentReportSystem(), user, (partial: string) => {
         if (this.thinkRunning) {
@@ -205,6 +241,10 @@ export struct ReportContent {
           this.thinkRunning = false;
           this.thinkExpanded = false;
         }
+        // 【流式还原的坑】partial 是累计全文，但任意前缀都可能在编号中间被切断
+        // （"…S0" + "01…"）。若在这里逐段还原，"S0" 不是合法编号会原样保留，
+        // 半个编号永远无法被替换。故流式期间**不还原**（展示编号不含隐私信息），
+        // 只在生成结束后对最终完整文本统一还原一次。
         this.resultThrottle.push(partial);
         // 实况窗：随正文进度更新百分比
         LiveView.onContent(partial).catch((e: Error) => {
@@ -231,12 +271,17 @@ export struct ReportContent {
         this.stopRequested = false;
         // 停止时把节流中最后一片补上，避免末尾内容缺失
         this.resultThrottle.flush();
+        // 【流式还原】停止时手上的也是"最终可获得文本"：整体还原一次，
+        // 用户看到的是真名版本（推导见 mask.restore 注释）。
+        this.result = mask.restore(this.result);
         return;
       }
-      this.result = content;
-      this.autoSaveHistory(content);
-      // 结果即时落盘草稿：任何异常退出/进程被杀都能恢复
-      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), content);
+      // 【结果还原】对 AI 返回的最终完整文本还原真名：展示、导出、存历史、草稿全部用它
+      const shown: string = mask.restore(content);
+      this.result = shown;
+      this.autoSaveHistory(shown);
+      // 结果即时落盘草稿：任何异常退出/进程被杀都能恢复（存的是真名版本，页面只给本机用户看）
+      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), shown);
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
       // 失败路径：补上节流中已收到的部分内容

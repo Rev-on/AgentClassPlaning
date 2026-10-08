@@ -24,6 +24,71 @@ window.RTM_OFFICE = (function () {
   }
 
   /* ============================================================
+   * 「AI 生成」元数据（docProps/core.xml + docProps/app.xml）
+   *
+   * 需求：接收方在**文件属性**里就能看到该文件由 AI 生成，而不只靠正文尾注。
+   * 纯函数集中在 ooxml-ai-metadata.js（与鸿蒙侧 OoxmlAiMetadata.ets 同构），
+   * 本文件只负责"把部件塞进包里"以及四个注册点。
+   * ============================================================ */
+  var AIM = window.OOXML_AI_METADATA || (typeof require === 'function' ? require('./ooxml-ai-metadata.js') : null);
+
+  /* docx 包的空闲包级关系 Id：rId1 已被 officeDocument 占用 */
+  var DOCX_CORE_RID = 'rId4';
+  var DOCX_APP_RID = 'rId5';
+  /* pptx 骨架的 .rels 已占用 rId1/rId2/rId3（app/core/officeDocument），只能用 rId4 起 */
+  var PPTX_CORE_RID = 'rId4';
+  var PPTX_APP_RID = 'rId5';
+
+  /**
+   * 组装元数据字段：title 取导出文件名（不含扩展名）。
+   *
+   * 标识文案**固定为中文在前**，不随界面语言切换 ——
+   * 元数据是给外部接收方（其他老师、家长、教务）看的，
+   * 若界面切成英文就把中文标识丢掉，反而违背了"标注 AI 生成"的初衷。
+   *
+   * 原先这里会拼接 aiNoteShort()（界面语言下的短标识），
+   * 但 description/subject/company 三条本身已写明"仅供参考"，
+   * 再拼一次会让同一句话出现两遍（"…仅供参考。（AI生成，仅供参考）"）。
+   * 故直接去掉该函数与拼接 —— 保留单份、稳定的中文标识。
+   */
+  function metaFields(title) {
+    return {
+      title: String(title == null ? '' : title) || 'Agent备课',
+      creator: 'Agent备课（AI 生成） / Lesson Prep Agent (AI-generated)',
+      lastModifiedBy: 'Agent备课（AI 生成） / Lesson Prep Agent (AI-generated)',
+      // 注意：这条描述本身已以"仅供参考。"收尾，**不要再拼接其它标识串** ——
+      // 否则同一句话会出现两遍（"…仅供参考。（AI生成，仅供参考）"），
+      // 在文件属性里很难看。与鸿蒙侧 DocxExporter/PptxExporter 同因，已一并修正。
+      description: '本文件内容由 AI 生成，仅供参考。',
+      subject: 'AI 生成，仅供参考',
+      appName: 'Agent备课 (AI)',
+      company: 'AI 生成，仅供参考',
+      keywords: 'AI生成,仅供参考,Agent备课,AI-generated'
+    };
+  }
+
+  /** 把 docProps 两个部件写入 zip，并补齐 [Content_Types].xml 与 _rels/.rels 两个注册点 */
+  function addAiMetadata(zip, idCore, idApp, title) {
+    if (!AIM) return zip; // 元数据模块缺失时保持原有合法包，绝不产出损坏文件
+    var f = metaFields(title);
+    zip.file(AIM.CORE_PATH, AIM.coreXml(f, new Date()));
+    zip.file(AIM.APP_PATH, AIM.appXml(f));
+    var ct = zip.file('[Content_Types].xml');
+    if (!ct) return zip;
+    return Promise.all([ct.async('string'), zip.file('_rels/.rels').async('string')])
+      .then(function (r) {
+        // 幂等：重复调用不会写第二份 Override / Relationship
+        var ctNew = /docProps\/core\.xml/.test(r[0])
+          ? r[0] : r[0].replace(/<\/Types>/, AIM.contentTypeOverrides() + '</Types>');
+        var relNew = /docProps\/core\.xml/.test(r[1])
+          ? r[1] : r[1].replace(/<\/Relationships>/, AIM.relationshipXml(idCore, idApp) + '</Relationships>');
+        zip.file('[Content_Types].xml', ctNew);
+        zip.file('_rels/.rels', relNew);
+        return zip;
+      });
+  }
+
+  /* ============================================================
    * Markdown → OOXML（省略 styles.xml 的最小合法 docx）
    * ============================================================ */
   function inlineRuns(text) {
@@ -135,9 +200,13 @@ window.RTM_OFFICE = (function () {
     zip.file('[Content_Types].xml', ct);
     zip.file('_rels/.rels', rels);
     zip.file('word/document.xml', documentXml);
-    return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }).then(function (buf) {
-      return { name: sanitizeName(fileName) + '.docx', data: buf };
-    });
+    return addAiMetadata(zip, DOCX_CORE_RID, DOCX_APP_RID, sanitizeName(fileName))
+      .then(function () {
+        return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+      })
+      .then(function (buf) {
+        return { name: sanitizeName(fileName) + '.docx', data: buf };
+      });
   }
 
   /* ============================================================
@@ -280,9 +349,13 @@ window.RTM_OFFICE = (function () {
     zip.file('[Content_Types].xml', ct);
     zip.file('_rels/.rels', rels);
     zip.file('word/document.xml', documentXml);
-    return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }).then(function (buf) {
-      return { name: sanitizeName(fileName) + '.docx', data: buf };
-    });
+    return addAiMetadata(zip, DOCX_CORE_RID, DOCX_APP_RID, sanitizeName(fileName))
+      .then(function () {
+        return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+      })
+      .then(function (buf) {
+        return { name: sanitizeName(fileName) + '.docx', data: buf };
+      });
   }
 
   /* ============================================================
@@ -393,7 +466,9 @@ window.RTM_OFFICE = (function () {
           zip.file('[Content_Types].xml', ct.replace(/<\/Types>/, extrasCt + '</Types>'));
           zip.file('ppt/_rels/presentation.xml.rels', rels.replace(/<\/Relationships>/, extrasRel + '</Relationships>'));
           zip.file('ppt/presentation.xml', pres.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, sldLst));
-          return zip;
+          // 骨架自带 docProps（dc:creator="PptxGenJS"、dc:title="PptxGenJS Presentation"），
+          // 内容误导，必须用 AI 生成标识整体覆盖；其余部件一律不动。
+          return addAiMetadata(zip, PPTX_CORE_RID, PPTX_APP_RID, sanitizeName(fileName));
         });
       })
       .then(function (zip) {
@@ -519,6 +594,12 @@ window.RTM_OFFICE = (function () {
     docxFromHtml: docxFromHtml,
     pptxFromCourseware: pptxFromCourseware,
     xlsxToRows: xlsxToRows,
-    docxToPlain: docxToPlain
+    docxToPlain: docxToPlain,
+    /* 供 node 侧测试复用的内部件（Electron 运行时不受影响） */
+    _internals: {
+      metaFields: metaFields,
+      addAiMetadata: addAiMetadata,
+      AIM: AIM
+    }
   };
 })();

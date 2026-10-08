@@ -65,14 +65,35 @@ docs/             课件大纲 JSON 使用教程、实况窗接入方案图、�
 
 详见 [`docs/实况窗后台进度功能说明.md`](docs/实况窗后台进度功能说明.md)。
 
-回归测试：
+回归测试：`test_liveview_contract.js`（27）+ `test_liveview_background.js`（95）+ `test_liveview_progress.js`（193）。
+
+## 导出文件的 AI 生成标识
+
+导出的 **docx / pptx 在文件属性（元数据）里就带「AI 生成」标识**，接收方不必打开正文即可知悉来源；
+正文末尾原有的「（AI生成，仅供参考）」尾注保留，两者是两层独立的标识。
+
+- **写入位置**：OOXML 包的 `docProps/core.xml`（`dc:creator` / `dc:lastModifiedBy` /
+  `dc:description` / `cp:contentStatus` / `cp:category`）与 `docProps/app.xml`
+  （`Application` / `Company`）。
+- **docx 需补三处**（缺任一 Word 会报"文件损坏"）：① 新增 `docProps` 两个部件；
+  ② `[Content_Types].xml` 加两条 Override；③ `_rels/.rels` 加两条 Relationship。
+- **pptx 模板自带 docProps 且原写着 `PptxGenJS`**，导出时覆盖为正确标识（模板已注册，**不重复注册**）。
+- **中文标识稳定**：元数据是给外部接收方看的，界面切英文时仍保留中文标识。
+- **标识逻辑为纯函数**，鸿蒙侧 `OoxmlAiMetadata.ets` 与 Windows 侧 `ooxml-ai-metadata.js` 同构。
+
+验证（含异源工具链交叉验证）：
 
 ```bash
 cd server
-node tools/test_liveview_contract.js     # 27 项
-node tools/test_liveview_background.js   # 95 项
-node tools/test_liveview_progress.js     # 193 项
+node tools/test_export_ai_metadata.js        # 153 项（真实产物 + 变异测试）
+python tools/lead_audit_export_artifacts.py  # 57 项（Python zipfile + minidom，异源）
+python tools/verify_export_metadata.py       # 29 项（结构与参考实现）
+python tools/verify_export_metadata_py.py    # 50 项
 ```
+
+> **尚未验证**：真机 Word / WPS / PowerPoint 打开（环境无法安装 Office）。
+> 已做到的结构级证明：三注册点齐全且无重复 Id/PartName、四个 XML 部件经真解析器解析通过、
+> `zipfile.testzip()` 无坏条目、pptx 条目数未减少。
 
 
 ## 快速构建

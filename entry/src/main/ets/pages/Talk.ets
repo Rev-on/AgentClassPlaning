@@ -24,6 +24,7 @@ import { RichHtml } from '../common/RichHtml';
 import { SafeInsets } from '../common/SafeInsets';
 import { LiveView } from '../common/LiveView';
 import { StreamThrottle } from '../common/StreamThrottle';
+import { NameMask, NameMaskSession, MaskError } from '../common/NameMask';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出 */
@@ -37,6 +38,19 @@ export struct TalkContent {
   @State sceneIndex: number = 0;
   @State toneIndex: number = 0;
   @State situation: string = I18n.t('def.situation');
+  /**
+   * 学生姓名（**可选**输入框）。
+   *
+   * 【为什么要有这个字段】本页的"学生情况描述"是自由文本，老师会手写姓名。
+   * 我们刻意**不做"2-4 个连续汉字就是姓名"的启发式猜测** —— 那会把
+   * "成绩下滑""家长会""单元测试"整片误改成编号，AI 收到的语义直接废掉。
+   * 因此策略是：
+   *   · 该输入框：老师填写姓名后，本页**确知**它是姓名，必被编号替换；
+   *   · 描述自由文本：只在"确知姓名"的范围内替换（含本框的值），
+   *     以及姓名由姓氏字库 + 常见后续字/双字名组合识别出的高置信候选
+   *     （见 maskSituation 的注释）。留空也能用。
+   */
+  @State studentName: string = '';
   @State remark: string = '';
   /** 附件（图片/文档/拍照），随生成请求一起提交 */
   @State attachFiles: AttachFile[] = [];
@@ -204,6 +218,200 @@ export struct TalkContent {
     return this.toneZh[this.toneIndex];
   }
 
+  /**
+   * 【隐私】把"学生情况描述"里的学生姓名替换为编号。
+   *
+   * 设计原则：**结构是有方向性的**，用错了方向就会把正文改成残句。
+   * 下面两条通道各自绑定一种"肯定无歧义"的语法结构，其余一律不猜：
+   *   通道① 字段标签 + 分隔符 + 值：`学生姓名：张三` —— 值在标签**后面**；
+   *   通道② 人名 + 称谓：`张三同学`、`王小明妈妈` —— 人名在称谓**前面**。
+   *
+   * ------------------------------------------------------------------
+   * 【曾经踩过的坑：把"称谓词"当成"字段标签"用】
+   *   旧实现把 '学生'、'孩子' 放进了 labels，并用 nameAfterLabel 抓"标签后的汉字"。
+   *   可 '学生'/'孩子' 是**称谓词**而非字段标签，句中到处都有，于是：
+   *       原文：孩子最近情绪低落，需要家访。
+   *       外发：孩子S001低落，需要家访。            ← 把"最近"当成了人名
+   *       原文：学生姓名：李四，数学成绩下滑明显。
+   *       外发：学生S002：S001，数学成绩下滑明显。    ← '学生' 抢在 '学生姓名' 之前命中，
+   *                                                      把"姓名"当成了人名
+   *   这类**误改比漏脱敏更糟**：漏脱敏只是隐私风险；误改是把错误、残缺的数据喂给 AI，
+   *   生成结论直接失真，且还原后与老师原文对不上。
+   *   因此现在：labels **只留真正的字段标签**（学生姓名/姓名/名字）；称谓词改走通道②。
+   *
+   * ------------------------------------------------------------------
+   * 【通道② 的边界规则：为什么"家长会""家访"不会被误伤】
+   *   称谓词本身有歧义 —— '家长' 在"家长会"里不是称谓。命中需三条同时成立：
+   *     a) 称谓**前面**紧跟 2-4 个汉字（这段才是候选人名）；
+   *     b) 候选人名前不紧邻虚词（的/和/与/给/对/跟…），排除"学校的同学"这类名词短语；
+   *     c) 称谓**后面**不紧跟常见后续字（会/访/们/长/里…），排除"家长会"被拆成 家长+会。
+   *   例：
+   *     "王小明妈妈反映…" → 前有"王小明"✓、前无虚词✓、'妈妈'后是"反"✓ → 登记「王小明」
+   *     "家长会需要沟通"   → '家长'后紧跟"会" ✗ → 放弃（整句逐字不变）
+   *     "需要家访"         → "家访"里根本没有 '家长' 这个子串 → 天然不命中
+   *   取舍："宁可漏、不可错" —— 漏了可以靠上方「学生姓名」输入框兜住；改错了无从补救。
+   */
+  private maskSituation(mask: NameMaskSession): string {
+    const src: string = this.situation;
+    // 通道①：真正的字段标签（"标签 + 分隔符 + 值"），长标签排前面
+    const labels: string[] = ['学生姓名', '姓名', '名字'];
+    for (let i: number = 0; i < labels.length; i++) {
+      mask.registerAll(TalkContent.nameAfterLabel(src, labels[i]));
+    }
+    // 通道②：人名 + 称谓（人名在前），带后界裁剪避免"家长会"被拆开
+    const roles: string[] = ['同学', '小朋友',
+      '的妈妈', '的爸爸', '的母亲', '的父亲', '的家长', '的奶奶', '的爷爷',
+      '妈妈', '爸爸', '母亲', '父亲', '家长', '奶奶', '爷爷'];
+    for (let i: number = 0; i < roles.length; i++) {
+      mask.registerAll(TalkContent.nameBefore(src, roles[i], 4));
+    }
+    // ③ 已知姓名（输入框 + 上面两路）全量替换，确保一个都不剩
+    return mask.maskFreeText(src, true);
+  }
+
+  /**
+   * 抓取「称谓前的人名」：在 text 中找到 role 前紧跟的 2-4 个汉字。
+   * 例：role='同学'，"张三同学" → '张三'；role='妈妈'，"王小明妈妈" → '王小明'。
+   *
+   * 三重边界裁剪（缺一不可，理由见 maskSituation 的【通道②】）：
+   *   a) 候选必须 2-4 个汉字（单字不成名）；
+   *   b) 候选前不紧邻虚词 —— "学校的同学"里的"学校"不是人名；
+   *   c) 称谓后不紧跟常见后续字 —— "家长会""妈妈们"里的称谓只是构词成分。
+   *
+   * 另有一条**去领属"的"**的归一化（d），理由见下方注释。
+   */
+  private static nameBefore(text: string, role: string, maxLen: number): string[] {
+    const out: string[] = [];
+    let from: number = 0;
+    let idx: number = text.indexOf(role, from);
+    while (idx >= 0) {
+      // (c) 称谓后紧跟常见后续字 → 该 role 是构词成分，不构成称谓结构
+      const after: string = text.substring(idx + role.length, idx + role.length + 1);
+      if (!TalkContent.isRoleSuffix(after)) {
+        const prefix: string = text.substring(0, idx);
+        // (d) 去掉候选尾部的领属助词"的"：
+        //     roles 里同时存在带"的"（'的妈妈'）与不带"的"（'妈妈'）两种写法，
+        //     于是 "李四的妈妈希望…" 会命中两次：
+        //       · role='的妈妈' @2 → 候选 "李四"      ✓ 正确
+        //       · role='妈妈'  @3 → 候选 "李四的"     ✗ 多出一条脏数据
+        //     结果编号表里同时登记 "李四" 与 "李四的"，而 "李四的" 并不是姓名。
+        //     这里统一剥掉尾部的"的"，两条路径归一化到同一个候选 "李四"，
+        //     NameMask.register 去重后只占一个编号（不影响隐私安全，但编号表更干净，
+        //     也避免 "李四的"→编号 的替换把正文里的"李四的"改成 "S001的"这种畸形结果）。
+        //     注：中文姓名不含"的"，剥离不会伤到真实姓名。
+        let cand: string = TalkContent.tailHan(prefix, maxLen);
+        while (cand.length >= 2 && cand.charAt(cand.length - 1) === '的') {
+          cand = cand.substring(0, cand.length - 1);
+        }
+        // (a) 候选 2-4 字  (b) 前不紧邻虚词  (a') 候选本身不是称谓/动词等常见词
+        if (cand.length >= 2 &&
+          !TalkContent.endsWithFunctionWord(prefix.substring(0, prefix.length - cand.length)) &&
+          !TalkContent.isStopWord(cand)) {
+          out.push(cand);
+        }
+      }
+      from = idx + role.length;
+      idx = text.indexOf(role, from);
+    }
+    return out;
+  }
+
+  /**
+   * 称谓后是否紧跟"常见后续字" —— 是则该称谓只是构词成分，不构成称谓结构。
+   * 例：家长+会、家长+访、妈妈+们、父亲+节。
+   */
+  private static isRoleSuffix(ch: string): boolean {
+    if (ch === '') {
+      return false;
+    }
+    return '会访们长里节日的和与或等些个人话'.indexOf(ch) >= 0;
+  }
+
+  /**
+   * 候选词是否是常见词（显然不是人名）。
+   * 拦住"妈妈说""家长反映"这类：称谓前紧跟的还是称谓/动词，不可能是姓名。
+   */
+  private static isStopWord(cand: string): boolean {
+    const stop: string[] = ['妈妈', '爸爸', '母亲', '父亲', '家长', '奶奶', '爷爷',
+      '孩子', '学生', '同学', '老师', '反映', '需要', '觉得', '认为', '表示', '说到'];
+    for (let i: number = 0; i < stop.length; i++) {
+      if (cand === stop[i]) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 抓取「标签后的人名」：标签 + 分隔符（：: 是 叫 为 等）之后紧跟的 2-4 个汉字。
+   * 例：'学生姓名：张三，' → '张三'。
+   */
+  private static nameAfterLabel(text: string, label: string): string[] {
+    const out: string[] = [];
+    const seps: string[] = ['：', ':', '是', '叫', '为', '＝', '='];
+    let from: number = 0;
+    let idx: number = text.indexOf(label, from);
+    while (idx >= 0) {
+      let p: number = idx + label.length;
+      // 允许标签与分隔符之间夹一个"是/叫"
+      if (p < text.length && TalkContent.isHan(text.charAt(p)) && TalkContent.isSep(text.charAt(p))) {
+        p = p + 1;
+      }
+      while (p < text.length && TalkContent.isSep(text.charAt(p))) {
+        p = p + 1;
+      }
+      const cand: string = TalkContent.headHan(text.substring(p), 4);
+      if (cand.length >= 2) {
+        out.push(cand);
+      }
+      from = idx + label.length;
+      idx = text.indexOf(label, from);
+    }
+    return out;
+  }
+
+  /** 取串尾连续的 1..maxLen 个汉字（不足则返回全部可取的汉字） */
+  private static tailHan(text: string, maxLen: number): string {
+    let end: number = text.length;
+    let start: number = end;
+    while (start > 0 && end - start < maxLen && TalkContent.isHan(text.charAt(start - 1))) {
+      start = start - 1;
+    }
+    return text.substring(start, end);
+  }
+
+  /** 取串首连续的 1..maxLen 个汉字 */
+  private static headHan(text: string, maxLen: number): string {
+    let end: number = 0;
+    while (end < text.length && end < maxLen && TalkContent.isHan(text.charAt(end))) {
+      end = end + 1;
+    }
+    return text.substring(0, end);
+  }
+
+  /** 是否汉字（U+4E00–U+9FFF，够用于中文姓名判定） */
+  private static isHan(ch: string): boolean {
+    const c: number = ch.charCodeAt(0);
+    return c >= 0x4E00 && c <= 0x9FFF;
+  }
+
+  /** 是否是姓名分隔符（标签与值之间的连接符） */
+  private static isSep(ch: string): boolean {
+    return ch === '：' || ch === ':' || ch === '=' || ch === '＝' || ch === ' ' || ch === '\u3000';
+  }
+
+  /**
+   * 人名候选前是否紧邻虚词（的/和/与/、/给/对/跟/是）——是则大概率不是姓名，
+   * 例如"学校的同学"里 role='同学' 前是"学校"，但再往前的"的"说明"学校"是名词。
+   */
+  private static endsWithFunctionWord(prefix: string): boolean {
+    if (prefix.length === 0) {
+      return false;
+    }
+    const last: string = prefix.charAt(prefix.length - 1);
+    return '的与和、给对跟同被把是在有'.indexOf(last) >= 0;
+  }
+
   async generate(): Promise<void> {
     if (this.situation.trim() === '') {
       promptAction.showToast({ message: this.t('err.noSituation') });
@@ -226,7 +434,48 @@ export struct TalkContent {
       hilog.warn(0x0000, 'Talk', 'LiveView.start 异常: %{public}s', e.message);
     });
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
-    const user: string = `沟通场景：${this.scene()}\n学生情况描述：${this.situation}\n期望语气：${this.tone()}\n\n请生成沟通话术建议。${remarkPart}`;
+    /**
+     * 【隐私】本页没有"学生姓名"输入框，姓名只可能以两种形式出现：
+     *   ① 学生姓名 = 直接写名字（"张三最近上课走神…"）—— 自动识别为姓名并编号；
+     *   ② 学生姓名（可选）= 老师显式填写的真实姓名（有输入框兜底，避免"高兴"这类
+     *      姓名恰好是常见词时被漏掉）。两者都登记进本次会话后，描述/备注里的
+     *      这些名字会被替换为编号再外发。
+     * 映射表只在本次生成的内存里（见 NameMask 文件头），结束即丢。
+     */
+    const mask: NameMaskSession = NameMask.session();
+    const explicitName: string = NameMask.maskStructured(mask, this.studentName);
+    const situationMasked: string = this.maskSituation(mask);
+    const remarkMasked: string = NameMask.maskFreeText(mask, this.remark);
+    // 姓名 → 编号，用于给 AI 一句"描述里提到的学生用这个编号"，避免它把编号当成无关代号
+    const nameHint: string = explicitName !== ''
+      ? `（描述中提到的学生 ${explicitName} 即此处所指学生）` : '';
+    const remarkOut: string = remarkMasked.trim() !== '' ? '\n【备注】' + remarkMasked.trim() : '';
+    const user: string = `沟通场景：${this.scene()}\n学生情况描述：${situationMasked}${nameHint}\n期望语气：${this.tone()}\n\n请生成沟通话术建议。${remarkOut}`;
+    /**
+     * 【隐私 fail-closed】出网前最后一道闸：prompt 里只要还残留任何已知真实姓名就抛错阻断。
+     * 同时把"已经流式提交到界面上的半截文本"整体还原成真名版本：
+     *   AI 正文里出现的编号（描述里的姓名已被换成编号）在界面上应以真名显示，
+     *   且**必须整体还原** —— 编号在流式过程中可能被 token 切成 "S0" + "01"，
+     *   逐片还原会漏掉半个编号（详见 NameMask 文件头"流式还原的坑"）。
+     */
+    let streamToShow: string = '';
+    try {
+      streamToShow = NameMask.applyToFlow(mask, Prompts.talkSystem(), user, this.result);
+    } catch (e) {
+      const me: MaskError = e as MaskError;
+      hilog.error(0x0000, 'Talk', '脱敏校验未通过，已阻断外发: %{public}s', me.code);
+      this.loading = false;
+      this.thinkRunning = false;
+      this.thinkExpected = false;
+      LiveView.done().catch((er: Error) => {
+        hilog.warn(0x0000, 'Talk', 'LiveView.done 异常: %{public}s', er.message);
+      });
+      promptAction.showToast({ message: this.t('err.maskFail') });
+      return;
+    }
+    if (streamToShow !== '') {
+      this.resultThrottle.push(streamToShow);
+    }
     try {
       const content: string = await AiService.chat(Prompts.talkSystem(), user, (partial: string) => {
         if (this.thinkRunning) {
@@ -234,6 +483,9 @@ export struct TalkContent {
           this.thinkRunning = false;
           this.thinkExpanded = false;
         }
+        // 【流式还原的坑】partial 是累计全文，但任意前缀都可能在编号中间被切断
+        // （"…S0" + "01…"）。故流式期间不还原，只展示编号；
+        // 生成结束后对最终完整文本还原一次，并用还原结果覆盖流式文本。
         this.resultThrottle.push(partial);
         // 实况窗：随正文进度更新百分比
         LiveView.onContent(partial).catch((e: Error) => {
@@ -260,12 +512,15 @@ export struct TalkContent {
         this.stopRequested = false;
         // 停止时把节流中最后一片补上，避免末尾内容缺失
         this.resultThrottle.flush();
+        // 停止时手上的也是"最终可获得文本"：整体还原一次，用户看到真名版本
+        this.result = mask.restore(this.result);
         return;
       }
-      this.result = content;
-      this.autoSaveHistory(content);
-      // 结果即时落盘草稿：任何异常退出/进程被杀都能恢复
-      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), content);
+      // 【结果还原】最终完整文本一次还原：展示/导出/存历史/草稿全部使用真名版本
+      const shown: string = mask.restore(content);
+      this.result = shown;
+      this.autoSaveHistory(shown);
+      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), shown);
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
       // 失败路径：补上节流中已收到的部分内容
@@ -388,6 +643,21 @@ export struct TalkContent {
             .onSelect((index: number) => {
               this.toneIndex = index;
             })
+        }
+        .width('100%')
+        // 【隐私】可选的学生姓名：填了它就一定被编号替换（描述里写没写都管用）。
+        // 留空也能用 —— 描述里"张三同学""学生姓名：张三"这类带称谓/标签的写法会被识别，
+        // 见 maskSituation 的说明。
+        Row({ space: 10 }) {
+          Text(this.t('label.studentName')).fontSize(15).fontColor(this.col('title')).width(86)
+            .fontFamily(AppFonts.family())
+          TextInput({
+            text: this.studentName,
+            placeholder: this.t('ph.talkStudentName')
+          })
+            .layoutWeight(1)
+            .height(42)
+            .onChange((v: string) => { this.studentName = v; })
         }
         .width('100%')
         Text(this.t('talk.situationDesc'))

@@ -8,6 +8,7 @@ import { common } from '@kit.AbilityKit';
 import promptAction from '@ohos.promptAction';
 import JSZip from '@ohos/jszip';
 import { I18n } from './I18n';
+import { OoxmlAiMetadata, AiMetadataFields } from './OoxmlAiMetadata';
 
 /** 课件大纲的一页 */
 export interface CourseSlide {
@@ -316,7 +317,7 @@ export class PptxExporter {
 
   /** 导出课件为 .pptx 粗稿（兼容 AI 直出 OOXML 片段、HTML 课件、旧 JSON 大纲三种形态；选择保存位置） */
   static async exportPptx(context: common.UIAbilityContext, json: string, fileName: string): Promise<void> {
-    const buffer: ArrayBuffer = await PptxExporter.buildPptxBuffer(context, json);
+    const buffer: ArrayBuffer = await PptxExporter.buildPptxBuffer(context, json, fileName);
     const savePicker = new picker.DocumentViewPicker(context);
     const saveOptions = new picker.DocumentSaveOptions();
     saveOptions.newFileNames = [fileName];
@@ -334,7 +335,7 @@ export class PptxExporter {
 
   /** 导出课件 .pptx 到应用沙箱 filesDir（供 ShareKit 系统分享面板读取），返回文件路径 */
   static async exportPptxToFile(context: common.UIAbilityContext, json: string, fileName: string): Promise<string> {
-    const buffer: ArrayBuffer = await PptxExporter.buildPptxBuffer(context, json);
+    const buffer: ArrayBuffer = await PptxExporter.buildPptxBuffer(context, json, fileName);
     const path: string = context.filesDir + '/share_' + Date.now() + '_' + fileName;
     const file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
     fs.writeSync(file.fd, buffer);
@@ -343,7 +344,7 @@ export class PptxExporter {
   }
 
   /** 组装 .pptx 包字节（兼容 OOXML 片段/HTML 课件/JSON 大纲三种形态，基于内置模板逐页注入） */
-  private static async buildPptxBuffer(context: common.UIAbilityContext, json: string): Promise<ArrayBuffer> {
+  private static async buildPptxBuffer(context: common.UIAbilityContext, json: string, fileName: string): Promise<ArrayBuffer> {
     let slides: CourseSlide[] | null = PptxExporter.parseOoxmlFragments(json);
     if (slides === null || slides.length === 0) {
       slides = PptxExporter.parseHtmlCourseware(json);
@@ -415,11 +416,46 @@ export class PptxExporter {
       pres = pres.substring(0, si + startTag.length) + inner + pres.substring(ei);
     }
     zip.file(presName, pres);
-    // 6. 打包
+    // 7. 覆盖模板自带的 docProps
+    //    模板 pptskel.pptx 由 PptxGenJS 生成，其 docProps/core.xml 里
+    //    dc:creator / cp:lastModifiedBy = "PptxGenJS"、dc:title = "PptxGenJS Presentation"，
+    //    作为对外交付物是误导性信息，必须整体覆盖为「AI 生成」标识。
+    //    模板的 [Content_Types].xml 与 _rels/.rels 已注册好 docProps 两个部件，
+    //    故此处只需覆盖部件本体，不重复注册（重复注册会产生非法重复 Override）。
+    const fields: AiMetadataFields = PptxExporter.aiMetadataFields(fileName);
+    zip.file(OoxmlAiMetadata.CORE_PATH, OoxmlAiMetadata.coreXml(fields, new Date()));
+    zip.file(OoxmlAiMetadata.APP_PATH, OoxmlAiMetadata.appXml(fields));
+    // 8. 打包
     return (await zip.generateAsync({
       type: 'arraybuffer',
       compression: 'DEFLATE'
     })) as ArrayBuffer;
+  }
+
+  /**
+   * 组装元数据字段。文案走 I18n（新增 meta.ai.* 键），**不在此硬编码中文**；
+   * 但 meta.ai.mark 本身是"中文在前、英文在后"的双语串，故界面切英文也不会丢中文标识。
+   */
+  private static aiMetadataFields(fileName: string): AiMetadataFields {
+    let title: string = fileName;
+    const dot: number = title.lastIndexOf('.');
+    if (dot > 0) {
+      title = title.substring(0, dot);
+    }
+    title = title.trim();
+    const mark: string = I18n.t('meta.ai.mark');
+    return {
+      title: title !== '' ? title : I18n.t('meta.ai.app'),
+      creator: I18n.t('meta.ai.creator'),
+      lastModifiedBy: I18n.t('meta.ai.creator'),
+      // 注意：meta.ai.desc 本身已以"仅供参考。"收尾，**不要再拼 mark** ——
+      // 否则 description 里同一句话会出现两遍（与 DocxExporter 同因，已一并修正）。
+      description: I18n.t('meta.ai.desc'),
+      subject: mark,
+      appName: I18n.t('meta.ai.app'),
+      company: mark,
+      keywords: I18n.t('meta.ai.keywords')
+    };
   }
 
   // ============ 幻灯片部件 XML ============

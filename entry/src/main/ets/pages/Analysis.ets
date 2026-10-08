@@ -27,6 +27,8 @@ import { RichHtml } from '../common/RichHtml';
 import { SafeInsets } from '../common/SafeInsets';
 import { LiveView } from '../common/LiveView';
 import { StreamThrottle } from '../common/StreamThrottle';
+import { NameMask, NameMaskSession, MaskError, TableMaskResult } from '../common/NameMask';
+import { AnalysisStore } from '../common/AnalysisStore';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 完成后定位到结果顶部时预留的内边距（vp）：让预览顶部操作按钮完整露出 */
@@ -223,14 +225,104 @@ export struct AnalysisContent {
       hilog.warn(0x0000, 'Analysis', 'LiveView.start 异常: %{public}s', e.message);
     });
     const remarkPart: string = this.remark.trim() !== '' ? '\n【备注】' + this.remark.trim() : '';
-    const user: string = `班级成绩数据（由 Excel 表格解析生成）：\n${ExcelParser.toJson(rows)}\n\n请生成班级学情分析报告。${remarkPart}`;
+    /**
+     * 【隐私】发给 AI 的成绩数据必须**按列脱敏**：只有姓名列被换成编号（张三→S001），
+     * 语文/数学/总分/学号等列逐字节保持原样。
+     *
+     * 为什么不能对整串 JSON 做无差别替换：
+     *   没有列语义的替换会把"优/良/及格"这类成绩等级、学号数字一起改掉，
+     *   AI 收到的是错数据（分析结论直接失真），还原后也与老师原文对不上。
+     *   列识别逻辑在 NameMask.maskTable（支持「姓名/学生姓名/名字/学生/name…」多写法）。
+     *
+     * 无姓名列时（如只有"题号/得分"的统计表）不是脱敏失败，而是合法输入：
+     * 此时 masked=false，这里提示老师确认表格里确实没有学生隐私字段。
+     */
+    const mask: NameMaskSession = NameMask.session();
+    const tableMask: TableMaskResult = { rows: rows, nameColumns: [], masked: false };
+    let tableJson: string = '';
     try {
-      const content: string = await AiService.chat(Prompts.analysisSystem(), user, (partial: string) => {
+      tableJson = ExcelParser.toJsonMaskedText(mask, rows, tableMask, false);
+    } catch (e) {
+      // 脱敏环节自身异常：fail-closed，绝不退回原文发送
+      const me: MaskError = e as MaskError;
+      hilog.error(0x0000, 'Analysis', '表格脱敏失败，已阻断外发: %{public}s', me.code);
+      this.loading = false;
+      this.thinkRunning = false;
+      this.thinkExpected = false;
+      LiveView.done().catch((er: Error) => {
+        hilog.warn(0x0000, 'Analysis', 'LiveView.done 异常: %{public}s', er.message);
+      });
+      promptAction.showToast({ message: this.t('err.maskFail') });
+      return;
+    }
+    if (!tableMask.masked) {
+      // 未识别到姓名列：表格按原样发送。这里只提示，不阻断 ——
+      // 统计类表格（无学生字段）是合法用法，阻断会让功能不可用。
+      promptAction.showToast({ message: this.t('excel.errNoNameCol') });
+    }
+    // 自由文本（备注 / 表格外的补充说明）同样兜底：已知姓名一律抹成编号
+    const remarkMasked: string = NameMask.maskFreeText(mask, remarkPart);
+
+    /**
+     * 【两次对比】读取上一次的学情分析报告，附进 prompt 让 AI 做总体对比。
+     *
+     * 为什么放在脱敏之后：上次报告是**已经生成并还原过的本地文本**，
+     * 其中可能含真实姓名（生成完成时我们做过 restore）。
+     * 直接拼进 prompt 会绕过姓名脱敏 —— 因此这里必须对上次报告
+     * 同样做一次 maskFreeText，把已知姓名重新抹成编号。
+     */
+    const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+    const last = await AnalysisStore.loadReport(ctx);
+    let systemPrompt: string = Prompts.analysisSystem();
+    let user: string = '';
+    if (last !== null) {
+      const lastMasked: string = NameMask.maskFreeText(mask, last.content);
+      systemPrompt = Prompts.analysisCompareSystem();
+      user = `【本次成绩数据】（由 Excel 表格解析生成）：\n${tableJson}\n\n` +
+        `【上一次学情分析报告】（生成于 ${last.time}）：\n${lastMasked}\n\n` +
+        `请生成本次班级学情分析报告，并在「两次对比」一章中逐项对照上次结论。${remarkMasked}`;
+      hilog.info(0x0000, 'Analysis', '已附带上次分析记录用于对比');
+    } else {
+      user = `班级成绩数据（由 Excel 表格解析生成）：\n${tableJson}\n\n请生成班级学情分析报告。${remarkMasked}`;
+    }
+
+    // 保存本次导入的成绩表格（供「我的」页热力图使用）；失败不影响生成
+    AnalysisStore.saveScores(ctx, rows).catch((e: Error) => {
+      hilog.warn(0x0000, 'Analysis', 'saveScores 异常: %{public}s', e.message);
+    });
+
+    /**
+     * 【隐私 fail-closed】出网前最后一道闸：prompt 里只要还残留任何已知真实姓名就抛错阻断。
+     *
+     * 本页**不传流式文本**给 applyToFlow：表格里的姓名已按列替换成编号，
+     * 界面上出现的编号不存在泄漏风险，无需在流式期做任何替换；
+     * 结果还原统一在生成完成时对最终完整文本做一次（见下方 mask.restore）。
+     * 这样也就不存在"编号被 token 切成 S0 + 01 导致逐段还原失败"的问题。
+     */
+    try {
+      NameMask.applyToFlow(mask, systemPrompt, user);
+    } catch (e) {
+      const me: MaskError = e as MaskError;
+      hilog.error(0x0000, 'Analysis', '脱敏校验未通过，已阻断外发: %{public}s', me.code);
+      this.loading = false;
+      this.thinkRunning = false;
+      this.thinkExpected = false;
+      LiveView.done().catch((er: Error) => {
+        hilog.warn(0x0000, 'Analysis', 'LiveView.done 异常: %{public}s', er.message);
+      });
+      promptAction.showToast({ message: this.t('err.maskFail') });
+      return;
+    }
+    try {
+      const content: string = await AiService.chat(systemPrompt, user, (partial: string) => {
         if (this.thinkRunning) {
           // 第一个正文字块到达＝思考阶段完成、正文开始输出：此刻折叠思考框
           this.thinkRunning = false;
           this.thinkExpanded = false;
         }
+        // 【流式还原的坑】partial 是累计全文，但任意前缀都可能在编号中间被切断。
+        // 逐段还原会漏掉 "S0"+"01" 这种跨界编号，故流式期间不还原，
+        // 只在生成结束后对最终完整文本统一还原一次。
         this.resultThrottle.push(partial);
         // 实况窗：随正文进度更新百分比
         LiveView.onContent(partial).catch((e: Error) => {
@@ -257,12 +349,21 @@ export struct AnalysisContent {
         this.stopRequested = false;
         // 停止时把节流中最后一片补上，避免末尾内容缺失
         this.resultThrottle.flush();
+        // 停止时手上的也是"最终可获得文本"：整体还原一次，用户看到真名版本
+        this.result = mask.restore(this.result);
         return;
       }
-      this.result = content;
-      this.autoSaveHistory(content);
-      // 结果即时落盘草稿：任何异常退出/进程被杀都能恢复
-      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), content);
+      // 【结果还原】最终完整文本一次还原：展示/导出/存历史/草稿全部使用真名版本
+      const shown: string = mask.restore(content);
+      this.result = shown;
+      this.autoSaveHistory(shown);
+      // 结果即时落盘草稿：任何异常退出/进程被杀都能恢复（存真名版本，仅本机可见）
+      PageDraft.save(getContext(this) as common.UIAbilityContext, this.genKey(), shown);
+      // 记录本次结论，供**下一次**学情分析做两次对比（存还原后的真名版本，仅本机）
+      AnalysisStore.saveReport(getContext(this) as common.UIAbilityContext, shown)
+        .catch((er: Error) => {
+          hilog.warn(0x0000, 'Analysis', 'saveReport 异常: %{public}s', er.message);
+        });
     } catch (e) {
       promptAction.showToast({ message: this.t('err.genFail') + (e as Error).message });
       // 失败路径：补上节流中已收到的部分内容

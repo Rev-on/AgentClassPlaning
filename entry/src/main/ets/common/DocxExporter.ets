@@ -10,6 +10,7 @@ import promptAction from '@ohos.promptAction';
 import JSZip from '@ohos/jszip';
 import { RichHtml, RichRun } from './RichHtml';
 import { I18n } from './I18n';
+import { OoxmlAiMetadata, AiMetadataFields } from './OoxmlAiMetadata';
 
 /** 块级元素（与渲染组件一致的简化结构） */
 interface DocxBlock {
@@ -37,7 +38,7 @@ export class DocxExporter {
 
   /** 主入口：导出内容为 .docx（弹出保存位置选择）。富文本 HTML 走样式转换；遗留 Markdown 走原解析 */
   static async exportDocx(context: common.UIAbilityContext, content: string, fileName: string): Promise<void> {
-    const buffer: ArrayBuffer = await DocxExporter.buildDocxBuffer(content);
+    const buffer: ArrayBuffer = await DocxExporter.buildDocxBuffer(content, fileName);
     // 选择保存位置并写入
     const savePicker = new picker.DocumentViewPicker(context);
     const saveOptions = new picker.DocumentSaveOptions();
@@ -54,8 +55,16 @@ export class DocxExporter {
     promptAction.showToast({ message: I18n.t('toast.exportedTo') + fileName });
   }
 
-  /** 组装 .docx 包字节（富文本 HTML → 样式转换；遗留 Markdown → 原解析） */
-  private static async buildDocxBuffer(content: string): Promise<ArrayBuffer> {
+  /**
+   * 组装 .docx 包字节（富文本 HTML → 样式转换；遗留 Markdown → 原解析）。
+   *
+   * ⚠ 加 docProps 必须**同时**改三处，漏掉后两者 Word 会直接报文件损坏：
+   *   ① 新增 docProps/core.xml 与 docProps/app.xml 两个部件；
+   *   ② [Content_Types].xml 加两条 Override；
+   *   ③ _rels/.rels 加两条指向它们的 Relationship。
+   *   部件本体是纯函数，见 OoxmlAiMetadata（便于测试直接调用）。
+   */
+  static async buildDocxBuffer(content: string, fileName: string): Promise<ArrayBuffer> {
     const documentXml: string = DocxExporter.isHtmlDoc(content) ?
       DocxExporter.buildHtmlDocumentXml(content) :
       DocxExporter.buildDocumentXml(content);
@@ -64,6 +73,16 @@ export class DocxExporter {
     zip.file('_rels/.rels', DocxExporter.relsXml());
     zip.folder('word');
     zip.file('word/document.xml', documentXml);
+    // docProps：文件属性里的「AI 生成」标识
+    const fields: AiMetadataFields = DocxExporter.aiMetadataFields(fileName);
+    zip.file(OoxmlAiMetadata.CORE_PATH, OoxmlAiMetadata.coreXml(fields, new Date()));
+    zip.file(OoxmlAiMetadata.APP_PATH, OoxmlAiMetadata.appXml(fields));
+    // 注册点②③必须写进**同一个包**，否则部件是"孤儿"，Office 判定包损坏
+    zip.file('[Content_Types].xml',
+      DocxExporter.contentTypesXml().replace('</Types>', OoxmlAiMetadata.contentTypeOverrides() + '</Types>'));
+    zip.file('_rels/.rels',
+      DocxExporter.relsXml().replace('</Relationships>',
+        OoxmlAiMetadata.relationshipXml(DocxExporter.RID_CORE, DocxExporter.RID_APP) + '</Relationships>'));
     return (await zip.generateAsync({
       type: 'arraybuffer',
       compression: 'DEFLATE'
@@ -72,7 +91,7 @@ export class DocxExporter {
 
   /** 导出 .docx 到应用沙箱 filesDir（供 ShareKit 系统分享面板直接读取），返回文件路径 */
   static async exportDocxToFile(context: common.UIAbilityContext, content: string, fileName: string): Promise<string> {
-    const buffer: ArrayBuffer = await DocxExporter.buildDocxBuffer(content);
+    const buffer: ArrayBuffer = await DocxExporter.buildDocxBuffer(content, fileName);
     const path: string = context.filesDir + '/share_' + Date.now() + '_' + fileName;
     const file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
     fs.writeSync(file.fd, buffer);
@@ -122,6 +141,38 @@ export class DocxExporter {
   }
 
   // ============ docx 固定结构 ============
+
+  /** docx 包级关系 Id：rId1 已被 officeDocument 占用，元数据用 rId4/rId5 */
+  private static readonly RID_CORE: string = 'rId4';
+  private static readonly RID_APP: string = 'rId5';
+
+  /**
+   * 组装元数据字段。文案走 I18n（新增 meta.ai.* 键），**不在此硬编码中文**；
+   * 但 meta.ai.mark 本身是"中文在前、英文在后"的双语串，故界面切英文也不会丢中文标识。
+   * title 取传入的导出文件名（去扩展名），让接收方在属性里一眼看到这份文件是什么。
+   */
+  private static aiMetadataFields(fileName: string): AiMetadataFields {
+    let title: string = fileName;
+    const dot: number = title.lastIndexOf('.');
+    if (dot > 0) {
+      title = title.substring(0, dot);
+    }
+    title = title.trim();
+    const mark: string = I18n.t('meta.ai.mark');
+    return {
+      title: title !== '' ? title : I18n.t('meta.ai.app'),
+      creator: I18n.t('meta.ai.creator'),
+      lastModifiedBy: I18n.t('meta.ai.creator'),
+      // 注意：meta.ai.desc 本身已以"仅供参考。"收尾，**不要再拼 mark** ——
+      // 否则 description 会变成"本文件内容由 AI 生成，仅供参考。AI 生成，仅供参考 / …"，
+      // 同一句话重复两遍，在文件属性里很难看（这是初版的真实问题）。
+      description: I18n.t('meta.ai.desc'),
+      subject: mark,
+      appName: I18n.t('meta.ai.app'),
+      company: mark,
+      keywords: I18n.t('meta.ai.keywords')
+    };
+  }
 
   private static contentTypesXml(): string {
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
