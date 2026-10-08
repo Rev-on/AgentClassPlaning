@@ -22,6 +22,9 @@ import { Duo2in1 } from '../common/Duo2in1';
 import { FoldDetect } from '../common/FoldDetect';
 import { LayoutPolicy } from '../common/LayoutPolicy';
 import { VerticalMongolianText } from '../common/components/VerticalMongolianText';
+import { HeatMapCard } from '../common/components/HeatMapCard';
+import { AnalysisStore, ScoreSnapshot } from '../common/AnalysisStore';
+import { HeatMap, HeatMapData } from '../common/HeatMap';
 import { IndexWide } from './IndexWide';
 import { IndexWideDuo } from './IndexWideDuo';
 
@@ -205,6 +208,12 @@ struct Index {
   @StorageProp('appDuo') @Watch('onDuoModeChanged') appDuo: boolean = false;
   /** 当前选中的底部页签序号（0=备课助手 / 1=家校沟通 / 2=我的），驱动页签选中态 */
   @State tabsIndex: number = 0;
+  /** 成绩热力图数据（来自最近一次导入的学情分析 Excel） */
+  @State heatData: HeatMapData = { subjects: [], rows: [], valid: false, nameCol: -1, time: '' };
+  /** 成绩数据的导入时间（展示用） */
+  @State heatTime: string = '';
+  /** 热力图是否正在加载（首帧避免闪"暂无数据"） */
+  @State heatLoading: boolean = true;
   private win: window.Window | undefined = undefined;
   /** 跨轴铺窗（瀑布模式）是否正在执行 / 已生效：用于去重与防抖 */
   private spanBusy: boolean = false;
@@ -567,6 +576,39 @@ struct Index {
     // 恢复未完成的后台生成任务（进程被杀/离开页面后的完成结果在此接收并保存）
     GenTask.recover(ctx).catch(() => {
     });
+    // 成绩热力图：读取最近一次「学情分析」导入的成绩表
+    this.loadHeatMap();
+  }
+
+  /**
+   * 加载成绩热力图数据。
+   *
+   * 数据来自 AnalysisStore 持久化的"最近一次导入的成绩 Excel"。
+   * 放在 aboutToAppear 会漏掉"从学情分析页导入后返回"的场景，
+   * 因此 onPageShow 也会调用（见下方 onPageShow）。
+   */
+  private loadHeatMap(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    this.heatLoading = true;
+    AnalysisStore.loadScores(ctx).then((snap: ScoreSnapshot | null) => {
+      if (snap === null) {
+        this.heatData = { subjects: [], rows: [], valid: false, nameCol: -1, time: '' };
+        this.heatTime = '';
+      } else {
+        this.heatData = HeatMap.build(snap.headers, snap.rows, snap.time);
+        this.heatTime = snap.time;
+      }
+      this.heatLoading = false;
+    }).catch(() => {
+      this.heatData = { subjects: [], rows: [], valid: false, nameCol: -1, time: '' };
+      this.heatTime = '';
+      this.heatLoading = false;
+    });
+  }
+
+  /** 页面重新可见时刷新热力图（导入新成绩后返回即可看到更新） */
+  onPageShow(): void {
+    this.loadHeatMap();
   }
 
   /** 注册内置少数民族字体（进程内仅执行一次；失败不阻塞界面） */
@@ -777,6 +819,14 @@ struct Index {
               Blank()
             }
             .width('100%')
+
+            // 成绩热力图：数据来自最近一次「学情分析」导入的 Excel 成绩表
+            HeatMapCard({
+              data: this.heatData,
+              timeText: this.heatTime,
+              loading: this.heatLoading,
+              onOpen: () => router.pushUrl({ url: 'pages/HeatMapDetail' })
+            })
 
             Grid() {
               GridItem() {

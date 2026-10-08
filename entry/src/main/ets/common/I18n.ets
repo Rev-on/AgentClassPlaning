@@ -14,6 +14,23 @@ export class I18n {
   static readonly LANG_KEY: string = 'appLang';
 
   private static readonly zh: Map<string, string> = new Map<string, string>([
+    ['heat.title', '成绩热力图'],
+    ['heat.detail', '查看详情 ›'],
+    ['heat.detailTitle', '成绩热力图'],
+    ['heat.empty', '暂无成绩数据。前往「学情分析」页导入 Excel 成绩表后，这里会自动生成热力图。'],
+    ['heat.loading', '正在加载成绩数据…'],
+    ['heat.source', '数据来源：最近一次导入的成绩表（{t}）'],
+    ['heat.moreRows', '还有 {n} 名学生，点击查看完整热力图'],
+    ['heat.studentCol', '学生'],
+    ['heat.low', '低'],
+    ['heat.high', '高'],
+    ['heat.missing', '缺考'],
+    ['heat.sumStudents', '学生 {n} 人'],
+    ['heat.sumSubjects', '科目 {n} 科'],
+    ['heat.sumAvg', '整体水平 {v}'],
+    ['card.heatmap', '成绩热力图'],
+    ['card.heatmap.desc', '按科目与学生看成绩分布'],
+
     ['tab.assistant', '备课助手'],
     ['tab.family', '家校沟通'],
     ['tab.mine', '我的'],

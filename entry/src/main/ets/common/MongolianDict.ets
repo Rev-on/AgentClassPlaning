@@ -4,6 +4,23 @@
  */
 export class MongolianDict {
   static readonly dict: Map<string, string> = new Map<string, string>([
+    ['heat.title', 'Онооны дулааны зураг'],
+    ['heat.detail', 'Дэлгэрэнгүй ›'],
+    ['heat.detailTitle', 'Онооны дулааны зураг'],
+    ['heat.empty', 'Онооны мэдээлэл байхгүй. «Суралцагчийн дүн шинжилгээ» хуудсанд Excel онооны хүснэгт оруулбал энд дулааны зураг үүснэ.'],
+    ['heat.loading', 'Онооны мэдээлэл ачаалж байна…'],
+    ['heat.source', 'Эх сурвалж: хамгийн сүүлд оруулсан онооны хүснэгт ({t})'],
+    ['heat.moreRows', 'Өөр {n} сурагч байна — бүрэн дулааны зургийг үзэхийн тулд дарна уу'],
+    ['heat.studentCol', 'Сурагч'],
+    ['heat.low', 'Бага'],
+    ['heat.high', 'Өндөр'],
+    ['heat.missing', 'Ороогүй'],
+    ['heat.sumStudents', '{n} сурагч'],
+    ['heat.sumSubjects', '{n} хичээл'],
+    ['heat.sumAvg', 'Ерөнхий түвшин {v}'],
+    ['card.heatmap', 'Онооны дулааны зураг'],
+    ['card.heatmap.desc', 'Хичээл, сурагчаар онооны тархалт'],
+
     ['tab.assistant', 'Хичээл бэлтгэх туслах'],
     ['tab.family', 'Гэр бүл, сургуулийн харилцаа'],
     ['tab.mine', 'Миний'],
