@@ -12,6 +12,10 @@
  *   GET  /api/task/:id         查询任务状态与结果
  *   GET  /api/tasks?deviceId=  按设备列出最近任务
  *   POST /api/push/register    上报设备 Push Token
+ *   GET  /api/push/devices     读回已注册设备的 Push Token（默认打码；?full=1 明文）
+ *                              —— 供 server/tools/get_device_token.js 使用
+ *                              （Token 只能在 App 进程内由 PushKit 申请，外部脚本
+ *                                无法自行获取，只能读回服务端已存的那份）
  *   POST /api/data/delete      删除本设备在服务端保存的全部数据（任务 + 设备注册记录）
  *   POST /api/push/receipt     接收华为 Push Kit 消息回执（华为服务器回调）
  *   GET  /api/push/receipt/stats 回执统计（调试用，需代理令牌）
@@ -1096,6 +1100,59 @@ app.post('/api/push/register', checkToken, (req, res) => {
   }
   tasks.registerDevice(deviceId, token);
   res.json({ ok: true });
+});
+
+/**
+ * 读回已注册设备的 Push Token（供 server/tools/get_device_token.js 使用）。
+ *
+ * 【为什么需要】
+ *   Push Token 由客户端的 `pushService.getToken()`（@kit.PushKit）在**应用进程内**
+ *   申请 —— 它依赖应用自己的 client_id / 签名证书 / AGC 身份，因此
+ *   **任何外部脚本都无法直接调用它**，shell 也取不到（不是文件、不是系统属性）。
+ *   唯一已经拿到 Token 的地方就是 App 上报后的服务端设备表，
+ *   所以"在电脑上看当前设备的 Token"只能通过本接口读回。
+ *
+ * 【安全设计（重要）】
+ *   Token 是敏感凭据：拿到它就能冒充服务端给这台设备推消息。因此：
+ *     1. 走 checkToken（需 x-proxy-token），与其它管理接口一致，**不对外开放**；
+ *     2. **默认打码**：只返回前后各 6 位与长度，避免明文 Token 出现在日志/终端历史里；
+ *        需要明文必须显式带 `?full=1`；
+ *     3. 支持 `?deviceId=` 精确查询单台设备；
+ *     4. 只读，不写、不删。
+ *   若不需要该能力，可删除本路由；本地读取仍可用
+ *   `node tools/get_device_token.js --local` 直接读 data/devices.json。
+ *
+ * 用法：GET /api/push/devices            → 全部设备（Token 打码）
+ *       GET /api/push/devices?full=1     → 全部设备（Token 明文）
+ *       GET /api/push/devices?deviceId=X → 指定设备
+ */
+app.get('/api/push/devices', checkToken, (req, res) => {
+  const wantFull = String(req.query.full || '') === '1';
+  const wantId = typeof req.query.deviceId === 'string' ? req.query.deviceId : '';
+
+  let list = tasks.listDevices();
+  if (wantId !== '') {
+    list = list.filter((d) => String(d.id || '') === wantId);
+  }
+
+  /**
+   * 打码：保留前后各 6 位。
+   * 短串（<=14）整体打星，避免"打码后仍可还原"。
+   */
+  const mask = (t) => {
+    const s = String(t || '');
+    if (s.length <= 14) return '*'.repeat(s.length);
+    return s.slice(0, 6) + '...(' + s.length + ' chars)...' + s.slice(-6);
+  };
+
+  const devices = list.map((d) => ({
+    id: d.id,
+    token: wantFull ? d.token : mask(d.token),
+    tokenLen: String(d.token || '').length,
+    updatedAt: d.updatedAt
+  }));
+
+  res.json({ ok: true, count: devices.length, masked: !wantFull, devices });
 });
 
 /**
