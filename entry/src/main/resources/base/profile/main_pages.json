@@ -17,6 +17,7 @@
     "pages/ClassDetail",
     "pages/ContinuationResult",
     "pages/WatchHome",
-    "pages/HeatMapDetail"
+    "pages/HeatMapDetail",
+    "pages/SubjectSetup"
   ]
 }

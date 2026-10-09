@@ -38,6 +38,16 @@ const ResultTopPadding: number = 12;
 export struct AnalysisContent {
   @State excelText: string = I18n.t('def.excel');
   @State remark: string = '';
+  /**
+   * 考试名称（如"期中""第二次月考"）。
+   *
+   * 原先是 Excel 表格里的一列，但：
+   *   · 一次导入的表格里所有行都是同一场考试，逐行重复填写纯属冗余；
+   *   · 作为独立输入框后，老师改考试名不必动表格，也不会破坏列结构。
+   * 该值会作为「考试」字段附进 prompt，供 AI 在报告里标明数据来源，
+   * 也用于两次对比时区分是哪两次考试。
+   */
+  @State examName: string = '';
   /** 附件（图片/文档/拍照），随生成请求一起提交 */
   @State attachFiles: AttachFile[] = [];
   @State previewRows: string[][] = [];
@@ -275,15 +285,23 @@ export struct AnalysisContent {
     const last = await AnalysisStore.loadReport(ctx);
     let systemPrompt: string = Prompts.analysisSystem();
     let user: string = '';
+    /**
+     * 考试名称：独立输入框的值，作为元信息附进 prompt。
+     * 需先脱敏（老师可能在考试名里写了学生名，虽罕见但要走同一道闸）。
+     */
+    const examPart: string = this.examName.trim() !== ''
+      ? '\n【本次考试名称】' + NameMask.maskFreeText(mask, this.examName.trim())
+      : '';
     if (last !== null) {
       const lastMasked: string = NameMask.maskFreeText(mask, last.content);
       systemPrompt = Prompts.analysisCompareSystem();
-      user = `【本次成绩数据】（由 Excel 表格解析生成）：\n${tableJson}\n\n` +
+      user = `【本次成绩数据】（由 Excel 表格解析生成）：\n${tableJson}${examPart}\n\n` +
         `【上一次学情分析报告】（生成于 ${last.time}）：\n${lastMasked}\n\n` +
         `请生成本次班级学情分析报告，并在「两次对比」一章中逐项对照上次结论。${remarkMasked}`;
       hilog.info(0x0000, 'Analysis', '已附带上次分析记录用于对比');
     } else {
-      user = `班级成绩数据（由 Excel 表格解析生成）：\n${tableJson}\n\n请生成班级学情分析报告。${remarkMasked}`;
+      user = `班级成绩数据（由 Excel 表格解析生成）：\n${tableJson}${examPart}\n\n` +
+        `请生成班级学情分析报告。${remarkMasked}`;
     }
 
     // 保存本次导入的成绩表格（供「我的」页热力图使用）；失败不影响生成
@@ -473,6 +491,26 @@ export struct AnalysisContent {
             .backgroundColor('#3E948A')
             .onClick(() => {
               this.importExcel();
+            })
+        }
+        .width('100%')
+        // 考试名称：独立输入框（原先在表格里作为一列，见 examName 注释）
+        Row({ space: 10 }) {
+          Text(this.t('label.exam'))
+            .fontFamily(AppFonts.family())
+            .fontSize(15)
+            .fontColor(this.col('title'))
+            .width(86)
+          TextInput({ text: this.examName, placeholder: this.t('ph.exam') })
+            .fontFamily(AppFonts.family())
+            .layoutWeight(1)
+            .height(42)
+            .backgroundColor(this.col('inputBg'))
+            .placeholderColor(this.col('hint'))
+            .caretColor('#4A90D9')
+            .borderRadius(10)
+            .onChange((v: string) => {
+              this.examName = v;
             })
         }
         .width('100%')

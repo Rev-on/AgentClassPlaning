@@ -4,16 +4,20 @@
  * 把"最近一次导入的成绩表格"转成适合热力图渲染的矩阵：
  *   横轴 = 科目（数值型列，如 语文/数学/英语/物理…）
  *   纵轴 = 学生（数据行）
- *   单元格深浅 = 该生该科成绩在本列中的相对位置（0~1）
+ *   单元格深浅 = **得分率**（得分 ÷ 该科满分）
  *
  * 关键设计决策：
+ *   · **按得分率而非列内归一化**：不同科目满分不同（语文 120、物理 100…），
+ *     若按"列内最大最小值"归一，一个班物理普遍考 90+ 时 90 分会显示成"最低"，
+ *     完全失真。得分率才反映学生真实掌握程度，也符合老师看成绩的直觉。
+ *   · 满分来自 SubjectStore（欢迎屏 / 「我的」页配置）。
+ *     **未配置满分的科目不进入热力图** —— 宁可不显示，也不能用错满分出错误的深浅。
  *   · **只把数值列当科目**：像"总分/平均分/排名"这类派生列会掩盖单科表现，
  *     而且量纲差异极大（总分 500 分 vs 单科 100 分）会让热力图失真，故排除。
  *   · 排除姓名列（由 NameMask.isNameHeader 判定），避免把姓名当成绩。
- *   · 归一化**按列独立进行**（每科的满分/难度不同），用"最小-最大"归一；
- *     若某列所有值相同，则统一给中间色（0.5），避免除零。
  *   · 若单元格不是合法数字（如"缺考""—"），标记为 missing，渲染成中性灰。
  */
+import { SubjectStore } from './SubjectStore';
 
 /** 非科目列的表头关键词（派生列/元数据列，不参与热力图） */
 const DERIVED_HEADER_KEYS: string[] = [
@@ -34,9 +38,8 @@ export interface HeatSubject {
   col: number;
   /** 科目名 */
   name: string;
-  /** 该列数值的最小值/最大值（用于色阶映射） */
-  min: number;
-  max: number;
+  /** 该科满分（来自配置） */
+  full: number;
 }
 
 export interface HeatCell {
@@ -133,7 +136,9 @@ export class HeatMap {
       }
     }
 
-    // 2) 选出科目列：排除姓名列、派生列，且该列**多数单元格是数字**
+    // 2) 选出科目列：排除姓名列、派生列，且该列**多数单元格是数字**，
+    //    并且**必须在 SubjectStore 里配置过满分**（未配置的不显示，
+    //    宁可不画也不能用错满分导致深浅失真）
     const subjects: HeatSubject[] = [];
     for (let j: number = 0; j < headers.length; j++) {
       if (j === nameCol) {
@@ -141,6 +146,11 @@ export class HeatMap {
       }
       const h: string = headers[j];
       if (h.trim() === '' || HeatMap.isDerivedHeader(h)) {
+        continue;
+      }
+      // 未配置满分的科目直接跳过
+      const full: number = SubjectStore.fullOf(h);
+      if (full <= 0) {
         continue;
       }
       let numCount: number = 0;
@@ -157,36 +167,14 @@ export class HeatMap {
       }
       // 阈值：非空单元格中至少一半是数字，才认定该列是成绩列
       if (total > 0 && numCount * 2 >= total) {
-        subjects.push({ col: j, name: h, min: NaN, max: NaN });
+        subjects.push({ col: j, name: h, full: full });
       }
     }
     if (subjects.length === 0) {
       return empty;
     }
 
-    // 3) 逐科目求极值（用于色阶）
-    for (let k: number = 0; k < subjects.length; k++) {
-      const sub: HeatSubject = subjects[k];
-      let mn: number = NaN;
-      let mx: number = NaN;
-      for (let i: number = 0; i < rows.length; i++) {
-        const raw: string = rows[i][sub.col] !== undefined ? rows[i][sub.col] : '';
-        const v: number = HeatMap.toNumber(raw);
-        if (isNaN(v)) {
-          continue;
-        }
-        if (isNaN(mn) || v < mn) {
-          mn = v;
-        }
-        if (isNaN(mx) || v > mx) {
-          mx = v;
-        }
-      }
-      sub.min = mn;
-      sub.max = mx;
-    }
-
-    // 4) 逐行构建单元格（归一化到 0~1）
+    // 3) 逐行构建单元格：level = 得分率 = 得分 ÷ 该科满分
     const outRows: HeatRow[] = [];
     for (let i: number = 0; i < rows.length; i++) {
       const cells: HeatCell[] = [];
@@ -196,18 +184,9 @@ export class HeatMap {
         const v: number = HeatMap.toNumber(raw);
         let level: number = -1;
         if (!isNaN(v)) {
-          if (isNaN(sub.min) || isNaN(sub.max) || sub.max === sub.min) {
-            // 该列所有值相同：统一中间色，避免除零
-            level = 0.5;
-          } else {
-            level = (v - sub.min) / (sub.max - sub.min);
-            if (level < 0) {
-              level = 0;
-            }
-            if (level > 1) {
-              level = 1;
-            }
-          }
+          const rate: number = v / sub.full;
+          // 允许超过 100%（如附加题），但色阶封顶 1
+          level = rate < 0 ? 0 : (rate > 1 ? 1 : rate);
         }
         cells.push({ raw: raw, value: v, level: level });
       }

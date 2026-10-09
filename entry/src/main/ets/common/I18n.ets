@@ -14,6 +14,21 @@ export class I18n {
   static readonly LANG_KEY: string = 'appLang';
 
   private static readonly zh: Map<string, string> = new Map<string, string>([
+    ['subj.title', '科目与满分设置'],
+    ['subj.welcomeTitle', '欢迎使用 Agent备课'],
+    ['subj.sub', '先设置要分析的科目与各自满分'],
+    ['subj.why', '成绩热力图按「得分率」着色。不同科目满分不同（如语文 120、物理 100），只看得分无法判断好坏，因此需要知道每科的满分。未勾选的科目不会出现在热力图里。'],
+    ['subj.pick', '需要分析的科目'],
+    ['subj.fullUnit', '分'],
+    ['subj.customHint', '其他科目（如体育、美术）'],
+    ['subj.add', '添加'],
+    ['subj.save', '保存'],
+    ['subj.useDefault', '用默认（语数英物各 100 分）'],
+    ['subj.errNoSubject', '请至少选择一个科目'],
+    ['subj.errBadFull', '{s} 的满分需要是大于 0 的数字'],
+    ['card.subjects', '科目与满分'],
+    ['card.subjects.desc', '设置分析的科目与满分'],
+
     ['heat.title', '成绩热力图'],
     ['heat.detail', '查看详情 ›'],
     ['heat.detailTitle', '成绩热力图'],
@@ -340,7 +355,7 @@ export class I18n {
     ['def.className', '八年级2班'],
     ['def.grades', '语文 88（班级均分 82）、数学 92（班级均分 78）、英语 85（班级均分 80）、物理 90（班级均分 76）'],
     ['def.observation', '课堂积极发言，作业完成质量高；性格开朗，与同学相处融洽。最近一次周测物理满分，数学进步明显。'],
-    ['def.excel', '姓名\t语文\t数学\t英语\t物理\t班级均分\t考试\n李同学\t88\t92\t85\t90\t82\t期中\n王同学\t75\t68\t72\t70\t82\t期中\n张同学\t60\t55\t58\t52\t82\t期中'],
+    ['def.excel', '姓名\t语文\t数学\t英语\t物理\t化学\t政治\t历史\t班级均分\n李同学\t88\t92\t85\t90\t86\t84\t80\t82\n王同学\t75\t68\t72\t70\t78\t76\t72\t82\n张同学\t60\t55\t58\t52\t64\t62\t58\t82'],
     ['btn.edit', '编辑'],
     ['btn.done', '完成'],
     ['editor.title', '编辑生成内容'],
@@ -747,7 +762,7 @@ export class I18n {
     ['def.className', 'Grade 8, Class 2'],
     ['def.grades', 'Chinese 88 (class avg 82), Math 92 (class avg 78), English 85 (class avg 80), Physics 90 (class avg 76)'],
     ['def.observation', 'Participates actively in class and turns in high-quality homework. Outgoing and gets along well with classmates. Scored full marks on the latest weekly Physics quiz, with clear progress in Math.'],
-    ['def.excel', 'Name\tChinese\tMath\tEnglish\tPhysics\tClass Avg\tExam\nStudent A\t88\t92\t85\t90\t82\tMidterm\nStudent B\t75\t68\t72\t70\t82\tMidterm\nStudent C\t60\t55\t58\t52\t82\tMidterm'],
+    ['def.excel', 'Name\tChinese\tMath\tEnglish\tPhysics\tChemistry\tPolitics\tHistory\tClass Avg\nStudent A\t88\t92\t85\t90\t86\t84\t80\t82\nStudent B\t75\t68\t72\t70\t78\t76\t72\t82\nStudent C\t60\t55\t58\t52\t64\t62\t58\t82'],
 
     ['btn.edit', 'Edit'],
     ['btn.done', 'Done'],

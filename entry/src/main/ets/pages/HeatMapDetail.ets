@@ -198,15 +198,23 @@ struct HeatMapDetail {
                   .width(NAME_W)
                   .maxLines(1)
                 ForEach(this.data.subjects, (s: HeatSubject) => {
-                  Text(s.name)
-                    .fontFamily(AppFonts.family())
-                    .fontSize(11)
-                    .fontColor(this.col('sub'))
-                    .width(CELL_W)
-                    .height(CELL_H)
-                    .textAlign(TextAlign.Center)
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Column({ space: 1 }) {
+                    Text(s.name)
+                      .fontFamily(AppFonts.family())
+                      .fontSize(11)
+                      .fontColor(this.col('sub'))
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    // 满分标注：让老师明确色阶是按"得分率"算的
+                    Text('/' + s.full.toString())
+                      .fontFamily(AppFonts.family())
+                      .fontSize(9)
+                      .fontColor(this.col('faint'))
+                      .maxLines(1)
+                  }
+                  .width(CELL_W)
+                  .height(CELL_H + 8)
+                  .justifyContent(FlexAlign.Center)
                 }, (s: HeatSubject) => 'dh_' + s.col.toString())
               }
               .width(NAME_W + (CELL_W + 3) * this.data.subjects.length)
@@ -224,16 +232,27 @@ struct HeatMapDetail {
                         .maxLines(1)
                         .textOverflow({ overflow: TextOverflow.Ellipsis })
                       ForEach(r.cells, (c: HeatCellLike) => {
-                        Text(c.raw === '' ? '—' : c.raw)
-                          .fontFamily(AppFonts.family())
-                          .fontSize(11)
-                          .fontColor(HeatMap.inkOf(c.level))
-                          .width(CELL_W)
-                          .height(CELL_H)
-                          .textAlign(TextAlign.Center)
-                          .maxLines(1)
-                          .backgroundColor(HeatMap.colorOf(c.level))
-                          .borderRadius(4)
+                        // 单元格显示"得分率"而非原始分数：色阶本就是按得分率算的，
+                        // 显示同一维度的数值才能让颜色与数字相互印证。
+                        // 原始分数放在下方小字里，保留可追溯性。
+                        Column({ space: 0 }) {
+                          Text(c.level < 0 ? '—' : Math.round(c.level * 100) + '%')
+                            .fontFamily(AppFonts.family())
+                            .fontSize(11)
+                            .fontWeight(FontWeight.Medium)
+                            .fontColor(HeatMap.inkOf(c.level))
+                            .maxLines(1)
+                          Text(c.raw === '' ? '' : c.raw)
+                            .fontFamily(AppFonts.family())
+                            .fontSize(8)
+                            .fontColor(HeatMap.inkOf(c.level))
+                            .maxLines(1)
+                        }
+                        .width(CELL_W)
+                        .height(CELL_H + 6)
+                        .justifyContent(FlexAlign.Center)
+                        .backgroundColor(HeatMap.colorOf(c.level))
+                        .borderRadius(4)
                       }, (c: HeatCellLike, idx: number) => 'dc_' + idx.toString())
                     }
                     .width(NAME_W + (CELL_W + 3) * this.data.subjects.length)

@@ -25,6 +25,7 @@ import { VerticalMongolianText } from '../common/components/VerticalMongolianTex
 import { HeatMapCard } from '../common/components/HeatMapCard';
 import { AnalysisStore, ScoreSnapshot } from '../common/AnalysisStore';
 import { HeatMap, HeatMapData } from '../common/HeatMap';
+import { SubjectStore, SubjectConfig } from '../common/SubjectStore';
 import { IndexWide } from './IndexWide';
 import { IndexWideDuo } from './IndexWideDuo';
 
@@ -32,6 +33,8 @@ import { IndexWideDuo } from './IndexWideDuo';
 @CustomDialog
 struct DisclaimerDialog {
   controller: CustomDialogController = new CustomDialogController({ builder: undefined });
+  /** 同意后的回调：由 Index 传入，用于接着走"科目与满分"首次引导 */
+  onAgreed: () => void = () => {};
   @State remain: number = 5;
   private timer: number = -1;
   @StorageProp('appLang') appLang: string = 'zh';
@@ -66,13 +69,15 @@ struct DisclaimerDialog {
     return AppTheme.color(key, this.resolvedTheme);
   }
 
-  /** 同意：写入标记后关闭，此后不再显示 */
+  /** 同意：写入标记后关闭，此后不再显示；随后接着走科目引导 */
   private onAgree(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     AcceptStore.setAccepted(ctx).then(() => {
       this.controller.close();
+      this.onAgreed();
     }).catch(() => {
       this.controller.close();
+      this.onAgreed();
     });
   }
 
@@ -226,7 +231,9 @@ struct Index {
   private lastVw: number = 0;
   private lastVh: number = 0;
   private dialogController: CustomDialogController = new CustomDialogController({
-    builder: DisclaimerDialog(),
+    builder: DisclaimerDialog({
+      onAgreed: () => this.maybeSetupSubjects()
+    }),
     autoCancel: false
   });
 
@@ -569,15 +576,57 @@ struct Index {
     const ctx = getContext(this) as common.UIAbilityContext;
     AcceptStore.getAccepted(ctx).then((acc: boolean) => {
       if (!acc) {
+        // 未同意：先弹免责声明。科目引导等用户点"同意"后再走
+        // （见 DisclaimerDialog 的 onAgree 回调），避免两个界面同时出现。
         this.dialogController.open();
+      } else {
+        // 已同意免责声明：检查是否配置过科目，没有则引导一次
+        this.maybeSetupSubjects();
       }
     }).catch(() => {
+      // 读取失败按"已同意"处理，不阻塞进入应用；科目引导仍会尝试
+      this.maybeSetupSubjects();
     });
     // 恢复未完成的后台生成任务（进程被杀/离开页面后的完成结果在此接收并保存）
     GenTask.recover(ctx).catch(() => {
     });
-    // 成绩热力图：读取最近一次「学情分析」导入的成绩表
+    // 成绩热力图：先给一次（此时可能还没读到配置，maybeSetupSubjects 会再刷一次）
     this.loadHeatMap();
+  }
+
+  /**
+   * 首次启动引导：让老师选择要分析的科目并填写满分。
+   *
+   * 触发条件：**尚未配置过科目**（用 SubjectStore 的独立标记判断）。
+   *   不用"是否同意过免责声明"来推断 —— 那样老用户（升级上来的、
+   *   没有科目配置的）会被永久跳过，热力图也就永远算不出得分率。
+   *
+   * 时序：免责声明弹窗优先。用户点"同意"后由回调触发本流程，
+   *       避免两个界面同时跳转/叠加。
+   */
+  private maybeSetupSubjects(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    SubjectStore.isInited(ctx).then((done: boolean) => {
+      if (done) {
+        // 已配置：把配置同步进 AppStorage 供热力图读取
+        SubjectStore.load(ctx).then((list: SubjectConfig[] | null) => {
+          if (list !== null) {
+            AppStorage.setOrCreate(SubjectStore.AS_KEY, JSON.stringify(list));
+          }
+          this.loadHeatMap();
+        }).catch(() => {
+          this.loadHeatMap();
+        });
+        return;
+      }
+      // 未配置：进入科目设置页（首次启动引导样式）
+      router.pushUrl({ url: 'pages/SubjectSetup', params: { firstRun: true } })
+        .catch(() => {
+          this.loadHeatMap();
+        });
+    }).catch(() => {
+      this.loadHeatMap();
+    });
   }
 
   /**
@@ -829,6 +878,14 @@ struct Index {
             })
 
             Grid() {
+              GridItem() {
+                FunCard({
+                  icon: I18n.badge('科', 'card.subjects'), title: this.t('card.subjects'),
+                  desc: this.t('card.subjects.desc'),
+                  bgColor: '#E8F1FB',
+                  onTap: () => router.pushUrl({ url: 'pages/SubjectSetup', params: { firstRun: false } })
+                })
+              }
               GridItem() {
                 FunCard({
                   icon: I18n.badge('史', 'card.history'), title: this.t('card.history'), desc: this.t('card.history.desc'),
